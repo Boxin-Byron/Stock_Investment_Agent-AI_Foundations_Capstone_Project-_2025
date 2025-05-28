@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 
-# 设置 Tushare Token（先注册 https://tushare.pro 注册后在个人中心获取 token）
+# 设置 Tushare Token
 ts.set_token("8017322f593efd7df8c9f04fde624cc94c9c60f256c5e0f6ffca6831")
 pro = ts.pro_api()
 
