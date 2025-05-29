@@ -1,2 +1,6 @@
+<<<<<<< HEAD
 cd fronted
+=======
+cd fronted
+>>>>>>> 314624cec5bec9cd359d9f704594c5dc37ef5320
 python app.py

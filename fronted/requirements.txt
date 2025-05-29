@@ -1,3 +1,9 @@
+<<<<<<< HEAD
 jqdatasdk==1.9.7
 pandas==2.2.3
 tushare==1.4.21
+=======
+jqdatasdk==1.9.7
+pandas==2.2.3
+tushare==1.4.21
+>>>>>>> 314624cec5bec9cd359d9f704594c5dc37ef5320
