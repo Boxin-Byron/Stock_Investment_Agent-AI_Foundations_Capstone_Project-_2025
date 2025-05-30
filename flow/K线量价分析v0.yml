@@ -1,0 +1,449 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: workflow
+  name: K线量价分析v0
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/siliconflow:0.0.15@65d5382cd2c25d45f3bffc1d20a8433588f9f0d7463eab15d5fad034c6a55c40
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: 1748334187483-source-1748334213035-target
+      source: '1748334187483'
+      sourceHandle: source
+      target: '1748334213035'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: end
+      id: 1748334213035-source-1748334267839-target
+      source: '1748334213035'
+      sourceHandle: source
+      target: '1748334267839'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: document-extractor
+      id: 1748331989067-source-1748399811785-target
+      source: '1748331989067'
+      sourceHandle: source
+      target: '1748399811785'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: code
+      id: 1748399811785-source-1748334187483-target
+      source: '1748399811785'
+      sourceHandle: source
+      target: '1748334187483'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: document-extractor
+      id: 1748331989067-source-1748399851755-target
+      source: '1748331989067'
+      sourceHandle: source
+      target: '1748399851755'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: code
+      id: 1748399851755-source-1748334187483-target
+      source: '1748399851755'
+      sourceHandle: source
+      target: '1748334187483'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: '输入：
+
+          ohlcv_data：JSON 数组，包含 OHLCV 数据（日期、开盘价、最高价、最低价、收盘价、成交量）。
+
+          industry_data：可选 JSON 对象，包含行业基准（ma5、ma10、ma20、avg_volume）。
+
+          输出：
+
+          ohlcv_data：传递给下一个节点。
+
+          industry_data：传递给下一个节点。'
+        selected: false
+        title: 开始
+        type: start
+        variables:
+        - allowed_file_extensions: []
+          allowed_file_types:
+          - document
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+          label: ohlcv_data
+          max_length: 48
+          options: []
+          required: true
+          type: file
+          variable: ohlcv_data
+        - allowed_file_extensions: []
+          allowed_file_types:
+          - document
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+          label: industry_data
+          max_length: 48
+          options: []
+          required: false
+          type: file
+          variable: industry_data
+      height: 287
+      id: '1748331989067'
+      position:
+        x: -57.412485706181826
+        y: -134.3276404809427
+      positionAbsolute:
+        x: -57.412485706181826
+        y: -134.3276404809427
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        code: "import pandas as pd\nimport numpy as np\nimport io\nimport json\n\n\
+          def main(ohlcv_text: str, industry_text: str) -> dict:\n    \"\"\"\n   \
+          \ 处理 OHLCV 和行业基准 CSV 字符串，计算均线、变化率并与行业基准比较。\n    \n    Args:\n        ohlcv_text\
+          \ (str): 从类似 kline_603056.csv 中提取的 CSV 字符串。\n        industry_text (str):\
+          \ 行业基准 CSV 字符串，格式为: ma5,ma10,avg_volume\n    \n    Returns:\n        dict:\
+          \ 包含 processed_data 和 latest_metrics 的字典。\n    \"\"\"\n    try:\n      \
+          \  # 1. 处理 OHLCV 数据\n        df_ohlcv = pd.read_csv(io.StringIO(ohlcv_text))\n\
+          \        \n        required_columns = ['trade_date', 'open', 'high', 'low',\
+          \ 'close', 'vol']\n        if not all(col in df_ohlcv.columns for col in\
+          \ required_columns):\n            raise ValueError(f\"OHLCV CSV 必须包含列: {required_columns}\"\
+          )\n\n        if df_ohlcv.empty:\n            raise ValueError(\"OHLCV 数据不能为空\"\
+          )\n\n        # 格式处理\n        df_ohlcv['trade_date'] = pd.to_datetime(df_ohlcv['trade_date'],\
+          \ format=\"%Y%m%d\")\n        df_ohlcv = df_ohlcv.sort_values(by='trade_date').reset_index(drop=True)\n\
+          \n        df_ohlcv['ma5'] = df_ohlcv['close'].rolling(window=5, min_periods=1).mean()\n\
+          \        df_ohlcv['ma10'] = df_ohlcv['close'].rolling(window=10, min_periods=1).mean()\n\
+          \        df_ohlcv['ma20'] = df_ohlcv['close'].rolling(window=20, min_periods=1).mean()\n\
+          \n        df_ohlcv['volume_change'] = df_ohlcv['vol'].pct_change() * 100\n\
+          \        df_ohlcv['price_change'] = df_ohlcv['close'].pct_change() * 100\n\
+          \n        df_ohlcv['volume_change'] = df_ohlcv['volume_change'].replace({np.nan:\
+          \ None})\n        df_ohlcv['price_change'] = df_ohlcv['price_change'].replace({np.nan:\
+          \ None})\n\n        # 2. 处理行业基准数据\n        df_industry = pd.read_csv(io.StringIO(industry_text))\n\
+          \n        if len(df_industry) != 1:\n            raise ValueError(\"industry_data\
+          \ CSV 必须只有一行数据\")\n\n        industry_data_dict = df_industry.iloc[0].to_dict()\n\
+          \n        # 3. 与行业基准比较\n        latest_ohlcv = df_ohlcv.iloc[-1]\n     \
+          \   industry_comparison = {}\n\n        for key in ['ma5', 'ma10']:\n  \
+          \          bench = industry_data_dict.get(key)\n            if bench and\
+          \ not np.isnan(bench):\n                industry_comparison[f'{key}_diff_pct']\
+          \ = ((latest_ohlcv[key] - bench) / bench) * 100\n            else:\n   \
+          \             industry_comparison[f'{key}_diff_pct'] = None\n\n        bench_vol\
+          \ = industry_data_dict.get('avg_volume')\n        if bench_vol and not np.isnan(bench_vol):\n\
+          \            industry_comparison['volume_diff_pct'] = ((latest_ohlcv['vol']\
+          \ - bench_vol) / bench_vol) * 100\n        else:\n            industry_comparison['volume_diff_pct']\
+          \ = None\n\n        for k, v in industry_comparison.items():\n         \
+          \   if pd.isna(v):\n                industry_comparison[k] = None\n\n  \
+          \      # 构建 latest_metrics\n        latest_metrics_dict = {\n          \
+          \  'date': latest_ohlcv['trade_date'].strftime('%Y-%m-%d'),\n          \
+          \  'close': latest_ohlcv['close'],\n            'ma5': latest_ohlcv['ma5'],\n\
+          \            'ma10': latest_ohlcv['ma10'],\n            'ma20': latest_ohlcv['ma20'],\n\
+          \            'volume': latest_ohlcv['vol'],\n            'price_change_pct':\
+          \ latest_ohlcv['price_change'],\n            'volume_change_pct': latest_ohlcv['volume_change'],\n\
+          \            'industry_comparison': industry_comparison\n        }\n\n \
+          \       # 清洗数据类型\n        for k, v in latest_metrics_dict.items():\n   \
+          \         if isinstance(v, dict):\n                for sub_k, sub_v in v.items():\n\
+          \                    if pd.isna(sub_v):\n                        v[sub_k]\
+          \ = None\n            elif pd.isna(v):\n                latest_metrics_dict[k]\
+          \ = None\n            elif isinstance(v, (np.integer, np.int64)):\n    \
+          \            latest_metrics_dict[k] = int(v)\n            elif isinstance(v,\
+          \ (np.floating, np.float64)):\n                latest_metrics_dict[k] =\
+          \ float(v)\n\n        # 返回数据\n        processed_data_list = df_ohlcv.replace({np.nan:\
+          \ None}).to_dict(orient='records')\n        latest_metrics_string = json.dumps(latest_metrics_dict,\
+          \ ensure_ascii=False, indent=2)\n\n        return {\n            'processed_data':\
+          \ processed_data_list,\n            'latest_metrics': latest_metrics_string\n\
+          \        }\n\n    except ValueError as ve:\n        raise ValueError(f\"\
+          数据处理错误: {str(ve)}\")\n    except Exception as e:\n        raise ValueError(f\"\
+          代码执行遇到意外问题: {str(e)}\")\n"
+        code_language: python3
+        desc: 数据预处理
+        outputs:
+          lastest_metrics:
+            children: null
+            type: string
+          processed_data:
+            children: null
+            type: array[object]
+        selected: false
+        title: 代码执行
+        type: code
+        variables:
+        - value_selector:
+          - '1748399811785'
+          - text
+          variable: ohlcv_text
+        - value_selector:
+          - '1748399851755'
+          - text
+          variable: industry_text
+      height: 81
+      id: '1748334187483'
+      position:
+        x: 551.1654463574721
+        y: -13.04720540787072
+      positionAbsolute:
+        x: 551.1654463574721
+        y: -13.04720540787072
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: true
+          variable_selector:
+          - '1748334187483'
+          - lastest_metrics
+        desc: ''
+        model:
+          completion_params: {}
+          mode: chat
+          name: Pro/deepseek-ai/DeepSeek-R1
+          provider: langgenius/siliconflow/siliconflow
+        prompt_template:
+        - edition_type: basic
+          id: 3d4d3f96-f640-4888-86c7-7b01cb97215c
+          jinja2_text: "# 系统角色与任务定义\r\n你是一名经验丰富的股票市场分析师，擅长基于技术指标和行业基准数据进行分析。你的任务是根据提供的最新指标数据（以\
+            \ JSON 字符串形式提供），计算股票表现的评分（0-100），总结关键亮点，并给出交易建议。指标数据包括收盘价、5/10/20 日均线、成交量、价格变化百分比、成交量变化百分比以及与行业基准的差异（ma5_diff,\
+            \ ma10_diff, volume_diff）。请严格按照以下评分标准、数据输入和输出格式进行分析。\r\n\r\n# 评分标准\r\n\
+            - 价格高于 5/10/20 日均线：每项 +20 分（最高 +60 分）。\r\n- 成交量增长 > 10%：+20 分。\r\n- 价格高于行业\
+            \ 5/10 日均线：每项 +10 分（最高 +20 分）。\r\n- 成交量高于行业平均：+10 分。\r\n- 价格或成交量负趋势（变化\
+            \ < 0%）：每项 -10 分（最低 0 分）。\r\n\r\n# 数据输入\r\n以下是最新指标数据（JSON 字符串格式）：{{ latest_metrics\
+            \ }}\r\n请解析此 JSON 字符串，提取字段值（close, ma5, ma10, ma20, volume, price_change,\
+            \ volume_change, industry_comparison.ma5_diff, industry_comparison.ma10_diff,\
+            \ industry_comparison.volume_diff）进行分析。\r\n\r\n# 输出格式\r\n输出必须为有效的 JSON，格式如下：\r\
+            \n```json\r\n{\r\n  \"score\": 0-100,\r\n  \"highlights\": [\"关键观察 1\"\
+            , \"关键观察 2\", ...],\r\n  \"recommendation\": \"买入/持有/卖出\"\r\n}"
+          role: system
+          text: "# 系统角色与任务定义\n你是一名经验丰富的股票市场分析师，擅长基于技术指标和行业基准数据进行分析。你的任务是根据提供的最新指标数据（以\
+            \ JSON 字符串形式提供），计算股票表现的评分（0-100），总结关键亮点，并给出交易建议。指标数据包括收盘价、5/10/20 日均线、成交量、价格变化百分比、成交量变化百分比以及与行业基准的差异（ma5_diff,\
+            \ ma10_diff, volume_diff）。请严格按照以下评分标准、数据输入和输出格式进行分析。\n\n# 评分标准\n- 价格高于\
+            \ 5/10/20 日均线：每项 +20 分（最高 +60 分）。\n- 成交量增长 > 10%：+20 分。\n- 价格高于行业 5/10\
+            \ 日均线：每项 +10 分（最高 +20 分）。\n- 成交量高于行业平均：+10 分。\n- 价格或成交量负趋势（变化 < 0%）：每项\
+            \ -10 分（最低 0 分）。\n\n# 数据输入\n以下是最新指标数据（JSON 字符串格式）：{{#context#}}\n请解析此\
+            \ JSON 字符串，提取字段值（close, ma5, ma10, ma20, volume, price_change, volume_change,\
+            \ industry_comparison.ma5_diff, industry_comparison.ma10_diff, industry_comparison.volume_diff）进行分析。\n\
+            \n# 输出格式\n输出必须为有效的 JSON，格式如下：\n```json\n{\n  \"score\": 0-100,\n  \"highlights\"\
+            : [\"关键观察 1\", \"关键观察 2\", ...],\n  \"recommendation\": \"买入/持有/卖出\"\n\
+            }"
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 1000
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              highlights:
+                description: 分析的亮点列表，至少包含一项
+                items:
+                  description: 分析亮点描述
+                  type: string
+                minItems: 1
+                type: array
+              recommendation:
+                description: 交易建议，限制为 '买入'、'持有' 或 '卖出'
+                enum:
+                - 买入
+                - 持有
+                - 卖出
+                type: string
+              score:
+                description: 评分，范围 0-100，表示股票表现
+                maximum: 100
+                minimum: 0
+                type: number
+            required:
+            - score
+            - highlights
+            - recommendation
+            type: object
+        structured_output_enabled: true
+        title: LLM
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 119
+      id: '1748334213035'
+      position:
+        x: 877.6219297959298
+        y: -13.04720540787072
+      positionAbsolute:
+        x: 877.6219297959298
+        y: -13.04720540787072
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: 结构化输出{score, highlights, recommendation}
+        outputs:
+        - value_selector:
+          - '1748334213035'
+          - structured_output
+          - score
+          variable: score
+        - value_selector:
+          - '1748334213035'
+          - structured_output
+          - highlights
+          variable: highlights
+        - value_selector:
+          - '1748334213035'
+          - structured_output
+          - recommendation
+          variable: recommendation
+        selected: false
+        title: 结束
+        type: end
+      height: 185
+      id: '1748334267839'
+      position:
+        x: 1216.1948488654548
+        y: -13.04720540787072
+      positionAbsolute:
+        x: 1216.1948488654548
+        y: -13.04720540787072
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: 文档提取器
+        type: document-extractor
+        variable_selector:
+        - '1748331989067'
+        - ohlcv_data
+      height: 91
+      id: '1748399811785'
+      position:
+        x: 250.12136233393284
+        y: -13.04720540787072
+      positionAbsolute:
+        x: 250.12136233393284
+        y: -13.04720540787072
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_array_file: false
+        selected: false
+        title: 文档提取器 2
+        type: document-extractor
+        variable_selector:
+        - '1748331989067'
+        - industry_data
+      height: 91
+      id: '1748399851755'
+      position:
+        x: 250.12136233393284
+        y: 115.95279459212928
+      positionAbsolute:
+        x: 250.12136233393284
+        y: 115.95279459212928
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 100.65928519581468
+      y: 356.598181148717
+      zoom: 0.6773402072049438
