@@ -1,0 +1,14 @@
+name: Keep Render Service Alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'  # 每10分钟执行一次（UTC时间）
+  workflow_dispatch:        # 支持手动触发
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl Render Health Endpoint
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" https://stock-investment-agent-ai-foundations.onrender.com/healthz
