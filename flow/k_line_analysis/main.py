@@ -11,6 +11,10 @@ class AnalyzeRequest(BaseModel):
     ohlcv_text: str
     industry_text: str
 
+@app.get("/healthz")
+def health_check():
+    return {"status": "ok"}
+
 @app.post("/analyze")
 def analyze(request: AnalyzeRequest):
     try:
@@ -79,7 +83,7 @@ def analyze(request: AnalyzeRequest):
                         v[sub_k] = None
             elif pd.isna(v):
                 latest_metrics_dict[k] = None
-            elif isinstance(v, (np.integer, np.int64)):
+            elif isinstance(v, (np.integer)):
                 latest_metrics_dict[k] = int(v)
             elif isinstance(v, (np.floating, np.float64)):
                 latest_metrics_dict[k] = float(v)
