@@ -2,6 +2,7 @@ import tushare as ts
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from typing import Optional
 
 # 设置 Tushare Token
 ts.set_token("8017322f593efd7df8c9f04fde624cc94c9c60f256c5e0f6ffca6831")
@@ -14,11 +15,11 @@ def format_ts_code(code: str):
     else:
         return code + ".SZ"
 
-def get_kline_csv(stock_code: str):
+def get_kline_csv(stock_code: str, today: Optional[datetime] = None):
     ts_code = format_ts_code(stock_code)
 
     # 拉取最近 100 个自然日，Tushare 会自动返回其中最多 50 个交易日
-    end_date = datetime.today()
+    end_date = today if today else datetime.now()
     start_date = end_date - timedelta(days=100)
     start = start_date.strftime("%Y%m%d")
     end = end_date.strftime("%Y%m%d")
@@ -37,4 +38,5 @@ def get_kline_csv(stock_code: str):
 
 if __name__ == '__main__':
     stock_code = input("请输入股票代码（如600519）：")
-    get_kline_csv(stock_code)
+    # today = datetime(2024, 5, 22)  # 指定某一天用于回测
+    get_kline_csv(stock_code,today=None)
