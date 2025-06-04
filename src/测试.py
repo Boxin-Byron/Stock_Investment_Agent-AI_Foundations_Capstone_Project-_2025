@@ -16,4 +16,4 @@ def get_stock_code_with_deepseek(stock_name: str):
 
     print(response.choices[0].message.content)
     # print(response)
-get_stock_code_with_deepseek('特锐德')
+get_stock_code_with_deepseek('苹果')
