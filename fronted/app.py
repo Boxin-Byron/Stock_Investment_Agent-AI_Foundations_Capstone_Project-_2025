@@ -5,11 +5,49 @@ import random
 import time
 from datetime import datetime, timedelta
 
+# ------------------------- 配置参数 -------------------------
+DIFY_HOST = "http://127.0.0.1:5001"  # 根据实际Dify部署地址修改
+
 # --------------- 新增：解决中文显示问题 ---------------
 import matplotlib.pyplot as plt
 plt.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体显示中文
 plt.rcParams['axes.unicode_minus'] = False    # 正常显示负号
 
+
+
+# ------------------------- 真实数据获取函数 -------------------------
+def call_stock_eval(stock_code):
+    """调用monitor.py的stock_eval接口获取真实数据"""
+    try:
+        # 创建完整的API URL
+        url = f"{DIFY_HOST}/api/stock_eval"
+        
+        # 发送请求（POST）
+        data = {"stock_code": stock_code}
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, data=json.dumps(data), headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            # 如果API返回错误状态码
+            return {
+                "industry_score": 0.0,
+                "kline_summary": ["无法获取数据"],
+                "sentiment_score": 0.0,
+                "key_events": ["API请求错误"],
+                "recommendation": "未知"
+            }
+    except Exception as e:
+        # 处理网络或其他错误
+        print(f"API调用错误: {e}")
+        return {
+            "industry_score": 0.0,
+            "kline_summary": ["网络连接错误"],
+            "sentiment_score": 0.0,
+            "key_events": [str(e)],
+            "recommendation": "未知"
+        }
 
 # ------------------------- 模拟数据生成函数 -------------------------
 def mock_kline_data(stock_code):
@@ -40,49 +78,80 @@ def create_analysis_block(title, default_content):
         json_display = gr.Json(value=default_content, container=False)
     return block, json_display
 
-def generate_prediction_chart(stock_code):
-    """生成价格预测图表（带中文标题）"""
-    base_price = random.randint(30, 100)
-    dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
-    prices = [round(base_price * (1 + 0.02*i) + random.uniform(-1,1), 2) for i in range(7)]
-    
-    df = pd.DataFrame({"日期": dates, "价格": prices})
-    
-    # 创建图表（确保中文字体生效）
-    fig, ax = plt.subplots(figsize=(8,5))
-    df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o")
-    ax.set_title("未来一周价格预测", fontsize=14)
-    ax.set_xlabel("日期", fontsize=12)
-    ax.set_ylabel("价格 (元)", fontsize=12)
-    ax.grid(True, linestyle="--", alpha=0.7)
-    plt.tight_layout()
-    
-    return {
-        "direction": "看涨 ▲" if prices[-1] > prices[0] else "看跌 ▼",
-        "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
-        "chart": fig
-    }
-
+def generate_prediction_chart(stock_code, industry_score):
+    """生成价格预测图表（使用真实数据中的行业评分作为基础）"""
+    try:
+        base_price = 50 + industry_score * 10  # 基础价格基于行业评分计算
+        dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
+        
+        # 更合理的价格变动模型
+        prices = [base_price]
+        for i in range(1, 7):
+            # 基于行业评分和市场随机因素生成价格
+            daily_change = (industry_score - 5) * 0.002 + random.uniform(-0.01, 0.01)
+            prices.append(prices[-1] * (1 + daily_change))
+        
+        # 生成数据框
+        df = pd.DataFrame({"日期": dates, "价格": prices})
+        
+        # 创建中文图表
+        fig, ax = plt.subplots(figsize=(8,5))
+        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o")
+        ax.set_title(f"{stock_code} 一周价格预测", fontsize=14)
+        ax.set_xlabel("日期", fontsize=12)
+        ax.set_ylabel("价格 (元)", fontsize=12)
+        ax.grid(True, linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        
+        return {
+            "direction": "看涨 ▲" if prices[-1] > prices[0] else "看跌 ▼",
+            "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
+            "chart": fig
+        }
+    except Exception as e:
+        # 图表生成错误处理
+        print(f"图表生成错误: {e}")
+        fig, ax = plt.subplots(figsize=(8,5))
+        ax.text(0.5, 0.5, "图表生成错误", ha='center', va='center', fontsize=14)
+        return {
+            "direction": "未知",
+            "change_rate": "0.00%",
+            "chart": fig
+        }
 # ------------------------- 主处理逻辑 -------------------------
 def analyze_stock(stock_code):
-    time.sleep(0.8)  # 模拟API延迟
+    # 获取真实数据
+    start_time = time.time()
+    real_data = call_stock_eval(stock_code)
+    api_time = time.time() - start_time
     
-    # 生成模拟数据
-    kline_data = mock_kline_data(stock_code)
-    sentiment_data = mock_news_sentiment(stock_code)
-    prediction = generate_prediction_chart(stock_code)
+    # 格式化数据用于界面展示
+    kline_data = {
+        "score": real_data.get("industry_score", 0.0),
+        "highlights": real_data.get("kline_summary", ["无数据"]),
+        "recommendation": real_data.get("recommendation", "未知")
+    }
     
-    # 生成投资建议
-    buy_signal = prediction["direction"].startswith("看涨") and kline_data["score"] > 6.5
-    recommendation = "推荐买入 💹" if buy_signal else "建议持有 ⏸️" if kline_data["score"] > 5 else "考虑卖出 🚨"
+    sentiment_data = {
+        "sentiment_score": real_data.get("sentiment_score", 0.0),
+        "key_events": real_data.get("key_events", ["无关键事件"])
+    }
     
+    # 使用真实数据中的行业评分生成预测
+    prediction = generate_prediction_chart(stock_code, kline_data["score"])
+    
+    # 模拟API处理延迟
+    if api_time < 0.5:
+        time.sleep(0.5 - api_time)
+    
+    # 返回界面所需的所有数据
     return [
         kline_data, 
         sentiment_data, 
         prediction["chart"], 
         prediction["direction"], 
         prediction["change_rate"], 
-        recommendation
+        real_data.get("recommendation", "未知")
     ]
 
 # ------------------------- 界面布局（优化样式）--------------------
