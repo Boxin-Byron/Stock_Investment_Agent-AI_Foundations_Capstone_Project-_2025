@@ -13,7 +13,7 @@ plt.rcParams['font.sans-serif'] = ['SimHei']  # 中文字体
 plt.rcParams['axes.unicode_minus'] = False
 
 # ------------------------- 配置参数 -------------------------
-DIFY_HOST = "http://127.0.0.1:5001"  # 根据实际Dify部署地址修改
+DIFY_HOST = os.getenv("DIFY_HOST", "http://monitor:5001")
 
 
 

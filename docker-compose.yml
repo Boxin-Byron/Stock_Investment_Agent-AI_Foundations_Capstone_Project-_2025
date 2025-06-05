@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  monitor:
+    build: ./monitor
+    container_name: stock-monitor
+    environment:
+      DIFY_BASE_URL: "https://api.dify.ai/v1"
+      DIFY_KLINE_FLOW_ID: "68e2bb51-06cb-4ef0-9dcc-b5eb929cba2a"
+      DIFY_NEWS_FLOW_ID: "6bc88152-dd50-4f14-98df-eac792696016"
+      DIFY_NEWS_API_KEY: "app-r34ivtgI84x2TEiqlZIzqqXp"
+      DIFY_KLINE_API_KEY: "app-HWzyDDddmtSZVv5Mi97P9yCw"
+      DEEPSEEK_API_KEY: "sk-653829eacd30417996f70834039c0414"
+    ports:
+      - "5001:5001"
+    restart: unless-stopped
+
+  app:
+    build: ./app
+    container_name: stock-frontend
+    environment:
+      DIFY_HOST: ${DIFY_HOST:-"http://monitor:5001"} 
+    ports:
+      - "7860:7860"
+    depends_on:
+      monitor:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  default:
+    name: stock-network
