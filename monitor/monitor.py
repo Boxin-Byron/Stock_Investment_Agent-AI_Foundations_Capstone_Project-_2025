@@ -1,8 +1,13 @@
+import os
+import random
+import datetime
 from fastapi import FastAPI
 import requests
 from fastapi import HTTPException
 from openai import OpenAI
 import unicodedata
+from fastapi.middleware.cors import CORSMiddleware
+
 
 # 从环境变量获取配置
 DIFY_BASE_URL = os.getenv("DIFY_BASE_URL", "https://api.dify.ai/v1")
@@ -107,8 +112,19 @@ def call_news_flow(stock_code):
         }
 
 
+@app.get("/health")
+async def health_check():
+    print(f"🏥 健康检查: {datetime.datetime.now().isoformat()}")
+    return {
+        "status": "ok",
+        "service": "stock-monitor",
+        "timestamp": datetime.datetime.now().isoformat()
+    }
+
+
 @app.post("/api/stock_eval")
 def stock_eval(stock_code: str):
+    print(f"📊 分析股票: {stock_code}")
     if contains_chinese(stock_code):
         stock_code = get_stock_code_with_deepseek(stock_code)
     kline_result = call_kline_flow(stock_code)
@@ -121,3 +137,7 @@ def stock_eval(stock_code: str):
         "key_events": news_result.get("key_events"),
         "recommendation": kline_result.get("recommendation")
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5001)

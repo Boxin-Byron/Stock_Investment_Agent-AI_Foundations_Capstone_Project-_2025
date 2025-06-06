@@ -1,0 +1,7 @@
+.git
+__pycache__
+.vscode
+.gradio
+*.bat
+使用说明.txt
+temp/
