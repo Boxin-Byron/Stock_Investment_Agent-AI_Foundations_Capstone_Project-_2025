@@ -25,7 +25,7 @@ services:
     ports:
       - "127.0.0.1:7860:7860"
     environment:
-      DIFY_HOST: "host.docker.internal:5001"  # Windows 专用主机名
+      DIFY_HOST: "http://monitor:5001"  # 修正：使用服务名进行容器间通信
       GRADIO_SERVER_NAME: "0.0.0.0"
     depends_on:
       monitor:

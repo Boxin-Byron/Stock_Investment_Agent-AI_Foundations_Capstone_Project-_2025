@@ -52,51 +52,41 @@ def call_stock_eval_api(stock_code):
        # 创建完整的API URL
         url = f"{DIFY_HOST}/api/stock_eval"
         
-        # 发送请求（POST）
-        data = {"stock_code": stock_code}
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(url, data=json.dumps(data), headers=headers, timeout=10)
+        # 修改：将数据作为 URL 查询参数发送，而不是 JSON 请求体
+        params = {"stock_code": stock_code}
         
-        response.raise_for_status()
-        if response.status_code == 200:
+        # 发送请求（POST），使用 params 参数
+        # 增加超时时间以应对可能的慢响应
+        response = requests.post(url, params=params, timeout=30)
         
-            result = response.json()
-            
-            return {
-                "kline_data": {
-                    "score": result.get("industry_score", 0),
-                    "highlights": result.get("kline_summary", []),
-                    "recommendation": result.get("recommendation", "中性")
-                },
-                "sentiment_data": {
-                    "sentiment_score": result.get("sentiment_score", 0),
-                    "key_events": result.get("key_events", [])
-                }
-            }
-        else:
-            return {
-                "kline_data": mock_kline_data(stock_code),
-                "sentiment_data": mock_news_sentiment(stock_code)
-            }
+        response.raise_for_status()  # 如果状态码不是2xx，将引发HTTPError
         
-    except requests.exceptions.ConnectionError:
-        print("❌ 连接失败：后端服务可能未启动")
+        result = response.json()
+        
         return {
-            "kline_data": mock_kline_data(stock_code),
-            "sentiment_data": mock_news_sentiment(stock_code)
+            "kline_data": {
+                "score": result.get("industry_score", 0),
+                "highlights": result.get("kline_summary", []),
+                "recommendation": result.get("recommendation", "中性")
+            },
+            "sentiment_data": {
+                "sentiment_score": result.get("sentiment_score", 0),
+                "key_events": result.get("key_events", [])
+            }
         }
+        
+    except requests.exceptions.ConnectionError as e:
+        print(f"❌ 连接失败：无法连接到后端服务 at {DIFY_HOST}")
+        # 抛出自定义异常，以便在UI上显示更友好的信息
+        raise ConnectionError(f"无法连接到后端分析服务({DIFY_HOST})，请检查后端服务是否正常运行。") from e
     except requests.exceptions.HTTPError as e:
         print(f"❌ HTTP错误 {e.response.status_code}: {e.response.text}")
-        return {
-            "kline_data": mock_kline_data(stock_code),
-            "sentiment_data": mock_news_sentiment(stock_code)
-        }
+        # 抛出自定义异常，以便在UI上显示更友好的信息
+        raise ValueError(f"后端服务返回错误: {e.response.status_code}") from e
     except Exception as e:
         print(f"❌ 股票评估API调用失败: {e}")
-        return {
-            "kline_data": mock_kline_data(stock_code),
-            "sentiment_data": mock_news_sentiment(stock_code)
-        }
+        # 重新抛出异常，以便上层捕获
+        raise e
 
 def mock_kline_data(stock_code):
     """模拟K线分析数据"""
