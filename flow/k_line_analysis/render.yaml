@@ -1,3 +1,4 @@
+# Deprecated Render configuration. The service is now built locally via Docker Compose.
 services:
   - type: web
     name: k_line_analysis

@@ -1,4 +1,4 @@
-name: Keep Render Service Alive
+name: Ping Local Kline Service
 
 on:
   schedule:
@@ -9,6 +9,6 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Curl Render Health Endpoint
+      - name: Curl Kline Health Endpoint
         run: |
-          curl -s -o /dev/null -w "%{http_code}" https://stock-investment-agent-ai-foundations.onrender.com/healthz
+          curl -s -o /dev/null -w "%{http_code}" http://localhost:10000/healthz
