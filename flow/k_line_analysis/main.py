@@ -4,12 +4,12 @@ import pandas as pd
 import numpy as np
 import io
 import json
+from data.etl import get_kline_csv
 
 app = FastAPI(title="K-Line Analysis API", version="1.0")
 
 class AnalyzeRequest(BaseModel):
-    ohlcv_text: str
-    industry_text: str
+    stock_code: str
 
 @app.get("/healthz")
 def health_check():
@@ -18,7 +18,9 @@ def health_check():
 @app.post("/analyze")
 def analyze(request: AnalyzeRequest):
     try:
-        df_daily = pd.read_csv(io.StringIO(request.ohlcv_text))
+        get_kline_csv(request.stock_code)
+        file_path = f"./temp/kline_{request.stock_code}.csv"
+        df_daily = pd.read_csv(file_path)
         required_daily_columns = ['trade_date', 'open', 'high', 'low', 'close', 'vol']
         missing_columns = [col for col in required_daily_columns if col not in df_daily.columns]
         if missing_columns:
