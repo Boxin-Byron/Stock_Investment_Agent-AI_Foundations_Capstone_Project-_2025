@@ -4,7 +4,20 @@ import pandas as pd
 import numpy as np
 import io
 import json
-from data.etl import get_kline_csv
+import os
+import sys
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+
+# 确保能够导入当前目录的模块
+current_dir = Path(__file__).parent
+if str(current_dir) not in sys.path:
+    sys.path.append(str(current_dir))
+
+# 直接从本地导入模块
+from etl import get_kline_csv
+from elt_intraday import get_kline_mairui_5min
 
 app = FastAPI(title="K-Line Analysis API", version="1.0")
 
@@ -15,12 +28,52 @@ class AnalyzeRequest(BaseModel):
 def health_check():
     return {"status": "ok"}
 
+def get_stock_data(stock_code: str, today: Optional[datetime] = None):
+    """
+    获取股票的日K线和分钟K线数据
+    
+    Args:
+        stock_code: 股票代码，如600519
+        today: 可选的日期参数，用于回测
+        
+    Returns:
+        tuple: (日K线文件路径, 分钟K线文件路径)
+    """
+    print(f"🔄 开始获取股票 {stock_code} 的数据...")
+    
+    # 确保temp目录存在
+    os.makedirs("temp", exist_ok=True)
+    
+    # 获取日K线数据
+    print("📊 获取日K线数据...")
+    get_kline_csv(stock_code, today)
+    
+    # 获取5分钟K线数据
+    print("📈 获取5分钟K线数据...")
+    get_kline_mairui_5min(stock_code, today)
+    
+    # 构建文件路径
+    daily_kline_path = f"./temp/kline_{stock_code}.csv"
+    
+    # 为分钟K线构建文件名
+    if today:
+        date_suffix = today.strftime('%Y%m%d')
+    else:
+        date_suffix = datetime.now().strftime('%Y%m%d')
+    intraday_kline_path = f"./temp/intraday_{stock_code}_{date_suffix}_5min.csv"
+    
+    print(f"✅ 数据获取完成: 日K线 -> {daily_kline_path}, 分钟K线 -> {intraday_kline_path}")
+    
+    return daily_kline_path, intraday_kline_path
+
 @app.post("/analyze")
 def analyze(request: AnalyzeRequest):
     try:
-        get_kline_csv(request.stock_code)
-        file_path = f"./temp/kline_{request.stock_code}.csv"
-        df_daily = pd.read_csv(file_path)
+        # 使用集成的数据获取函数
+        daily_path, intraday_path = get_stock_data(request.stock_code)
+        
+        # 读取日K线数据
+        df_daily = pd.read_csv(daily_path)
         required_daily_columns = ['trade_date', 'open', 'high', 'low', 'close', 'vol']
         missing_columns = [col for col in required_daily_columns if col not in df_daily.columns]
         if missing_columns:
@@ -206,3 +259,41 @@ def analyze(request: AnalyzeRequest):
         raise HTTPException(status_code=400, detail=f"数据处理错误: {str(ve)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"代码执行遇到意外问题: {str(e)}")
+
+
+# 命令行直接执行模式
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="股票K线数据获取与分析")
+    parser.add_argument("--code", type=str, help="股票代码，如600519")
+    parser.add_argument("--backtest", type=str, help="回测日期，格式YYYY-MM-DD，如2025-06-20")
+    parser.add_argument("--mode", choices=['data', 'api'], default='data',
+                       help="模式：data=只获取数据，api=启动API服务")
+    
+    args = parser.parse_args()
+    
+    # API模式：启动FastAPI服务
+    if args.mode == 'api':
+        import uvicorn
+        print("🚀 正在启动K线分析API服务")
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    # 数据获取模式
+    elif args.mode == 'data':
+        # 如果命令行没有提供参数，交互式输入
+        if not args.code:
+            args.code = input("请输入股票代码（如600519）：").strip()
+        
+        # 处理回测日期
+        today = None
+        if args.backtest:
+            try:
+                today = datetime.strptime(args.backtest, "%Y-%m-%d")
+                print(f"🕰️ 回测模式: {today.strftime('%Y-%m-%d')}")
+            except ValueError:
+                print("⚠️ 回测日期格式错误，使用当前日期")
+        
+        # 只获取数据
+        daily_path, intraday_path = get_stock_data(args.code, today)
+        print(f"📝 数据获取完成: \n- 日K线: {daily_path} \n- 分钟K线: {intraday_path}")
