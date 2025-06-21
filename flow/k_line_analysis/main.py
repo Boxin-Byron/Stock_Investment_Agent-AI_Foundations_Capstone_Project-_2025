@@ -46,217 +46,371 @@ def get_stock_data(stock_code: str, today: Optional[datetime] = None):
     
     # 获取日K线数据
     print("📊 获取日K线数据...")
-    get_kline_csv(stock_code, today)
+    df1 = get_kline_csv(stock_code, today)
     
     # 获取5分钟K线数据
     print("📈 获取5分钟K线数据...")
-    get_kline_mairui_5min(stock_code, today)
+    df2 = get_kline_mairui_5min(stock_code, today)
+    if df1.empty and df2.empty:
+        raise ValueError(f"获取股票 {stock_code} 的数据失败，请检查股票代码或网络连接。")
+
+    return df1, df2
+
+def analyze_daily_metrics(df_daily: pd.DataFrame) -> dict:
+    """
+    分析日K线数据，计算最新指标值
     
-    # 构建文件路径
-    daily_kline_path = f"./temp/kline_{stock_code}.csv"
+    Args:
+        df_daily: 日K线数据的DataFrame
+        
+    Returns:
+        dict: 最新指标值字典
+    """
+    if df_daily.empty:
+        return {
+            'date': None,
+            'close': None,
+            'volume': None,
+            'price_change_pct': None,
+            'volume_change_pct': None,
+            'technical_signals': {},
+            'daily_technical_indicators': {
+                'rsi': None,
+                'macd_diff': None,
+                'macd_dea': None,
+                'macd': None,
+                'k': None,
+                'd': None,
+                'j': None,
+                'boll_mid': None,
+                'boll_upper': None,
+                'boll_lower': None,
+                'cci': None,
+                'atr14': None,
+                'bias6': None,
+                'bias12': None
+            }
+        }
+    df_daily['trade_date'] = pd.to_datetime(df_daily['trade_date'], format="%Y%m%d")
+    df_daily = df_daily.sort_values(by='trade_date').reset_index(drop=True)
+
+    #计算技术指标_______________________________________________________________________________________________
+
+    # 成交量与价格变化率
+    df_daily['daily_volume_change_pct'] = df_daily['vol'].pct_change() * 100
+    df_daily['daily_price_change_pct'] = df_daily['close'].pct_change() * 100
+
+    # -------------------- 技术指标扩展 --------------------
+
+    # MACD
+    ema12 = df_daily['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df_daily['close'].ewm(span=26, adjust=False).mean()
+    df_daily['daily_macd_diff'] = ema12 - ema26
+    df_daily['daily_macd_dea'] = df_daily['daily_macd_diff'].ewm(span=9, adjust=False).mean()
+    df_daily['daily_macd'] = 2 * (df_daily['daily_macd_diff'] - df_daily['daily_macd_dea'])
+
+    # KDJ
+    low_n = df_daily['low'].rolling(window=9, min_periods=1).min()
+    high_n = df_daily['high'].rolling(window=9, min_periods=1).max()
+    rsv = (df_daily['close'] - low_n) / (high_n - low_n) * 100
+    df_daily['daily_k'] = rsv.ewm(com=2).mean()
+    df_daily['daily_d'] = df_daily['daily_k'].ewm(com=2).mean()
+    df_daily['daily_j'] = 3 * df_daily['daily_k'] - 2 * df_daily['daily_d']
+
+    # RSI
+    def calc_rsi(series, period):
+        delta = series.diff()
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        avg_gain = pd.Series(gain).rolling(window=period).mean()
+        avg_loss = pd.Series(loss).rolling(window=period).mean()
+        rs = avg_gain / (avg_loss + 1e-10)
+        return 100 - (100 / (1 + rs))
+
+    df_daily['daily_rsi6'] = calc_rsi(df_daily['close'], 6)
+    df_daily['daily_rsi12'] = calc_rsi(df_daily['close'], 12)
+    df_daily['daily_rsi24'] = calc_rsi(df_daily['close'], 24)
+
+    # BOLL（布林带）
+    ma20 = df_daily['close'].rolling(window=20).mean()
+    std20 = df_daily['close'].rolling(window=20).std()
+    df_daily['daily_boll_mid'] = ma20
+    df_daily['daily_boll_upper'] = ma20 + 2 * std20
+    df_daily['daily_boll_lower'] = ma20 - 2 * std20
+
+    # BIAS（乖离率）
+    df_daily['daily_bias6'] = (df_daily['close'] - df_daily['close'].rolling(window=6).mean()) / df_daily['close'].rolling(window=6).mean() * 100
+    df_daily['daily_bias12'] = (df_daily['close'] - df_daily['close'].rolling(window=12).mean()) / df_daily['close'].rolling(window=12).mean() * 100
+
+    # CCI（顺势指标）
+    tp = (df_daily['high'] + df_daily['low'] + df_daily['close']) / 3
+    ma_tp = tp.rolling(window=14).mean()
+    md = tp.rolling(window=14).apply(lambda x: np.mean(np.abs(x - x.mean())))
+    df_daily['daily_cci'] = (tp - ma_tp) / (0.015 * md)
+
+    # ATR（平均真实波幅）
+    high_low = df_daily['high'] - df_daily['low']
+    high_close = pd.Series(np.abs(df_daily['high'] - df_daily['close'].shift()), index=df_daily.index)
+    low_close = pd.Series(np.abs(df_daily['low'] - df_daily['close'].shift()), index=df_daily.index)
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df_daily['daily_atr14'] = tr.rolling(window=14).mean()
+
+    # 清理 NaN -> None 
+    df_daily = df_daily.replace({np.nan: None})
     
-    # 为分钟K线构建文件名
-    if today:
-        date_suffix = today.strftime('%Y%m%d')
-    else:
-        date_suffix = datetime.now().strftime('%Y%m%d')
-    intraday_kline_path = f"./temp/intraday_{stock_code}_{date_suffix}_5min.csv"
+    #____________________________________________________________________________________________
+
+    latest_ohlcv = df_daily.iloc[-1]
+
+    # 1. 技术信号识别
+    signal_analysis = {}
+
+    # RSI 信号：超买 >70，超卖 <30
+    rsi = latest_ohlcv.get('daily_rsi6')
+    if rsi is not None:
+        if rsi > 70:
+            signal_analysis['rsi_signal'] = '超买'
+        elif rsi < 30:
+            signal_analysis['rsi_signal'] = '超卖'
+        else:
+            signal_analysis['rsi_signal'] = '中性'
+
+    # MACD 金叉死叉判断
+    macd_diff = latest_ohlcv.get('daily_macd_diff')
+    macd_dea = latest_ohlcv.get('daily_macd_dea')
+    if macd_diff is not None and macd_dea is not None:
+        prev = df_daily.iloc[-2]
+        prev_diff = prev.get('daily_macd_diff')
+        prev_dea = prev.get('daily_macd_dea')
+        if prev_diff is not None and prev_dea is not None:
+            if prev_diff < prev_dea and macd_diff > macd_dea:
+                signal_analysis['macd_signal'] = '金叉'
+            elif prev_diff > prev_dea and macd_diff < macd_dea:
+                signal_analysis['macd_signal'] = '死叉'
+            else:
+                signal_analysis['macd_signal'] = '无明显信号'
+
+    # KDJ 判断：J 值极端代表短期拐点
+    j = latest_ohlcv.get('daily_j')
+    if j is not None:
+        if j > 100:
+            signal_analysis['kdj_signal'] = '超买拐点'
+        elif j < 0:
+            signal_analysis['kdj_signal'] = '超卖拐点'
+        else:
+            signal_analysis['kdj_signal'] = '中性'
+
+
+    # BOLL 布林带突破
+    boll_upper = latest_ohlcv.get('daily_boll_upper')
+    boll_lower = latest_ohlcv.get('daily_boll_lower')
+    if boll_upper is not None and boll_lower is not None:
+        if latest_ohlcv['close'] > boll_upper:
+            signal_analysis['boll_signal'] = '突破上轨'
+        elif latest_ohlcv['close'] < boll_lower:
+            signal_analysis['boll_signal'] = '突破下轨'
+        else:
+            signal_analysis['boll_signal'] = '未突破'
     
-    print(f"✅ 数据获取完成: 日K线 -> {daily_kline_path}, 分钟K线 -> {intraday_kline_path}")
+    # BIAS 乖离率信号
+    bias6 = latest_ohlcv.get('daily_bias6')
+    bias12 = latest_ohlcv.get('daily_bias12')
+    if bias6 is not None and bias12 is not None:
+        if bias6 > 10 or bias12 > 10:
+            signal_analysis['bias_signal'] = '偏离上轨'
+        elif bias6 < -10 or bias12 < -10:
+            signal_analysis['bias_signal'] = '偏离下轨'
+        else:
+            signal_analysis['bias_signal'] = '正常范围'
+
+    # CCI 信号：超买 >100，超卖 <-100
+    cci = latest_ohlcv.get('daily_cci')
+    if cci is not None:
+        if cci > 100:
+            signal_analysis['cci_signal'] = '超买'
+        elif cci < -100:
+            signal_analysis['cci_signal'] = '超卖'
+        else:
+            signal_analysis['cci_signal'] = '中性'
     
-    return daily_kline_path, intraday_kline_path
+    # ATR 波动率信号：高波动 >2，低波动 <0.5
+    atr14 = latest_ohlcv.get('daily_atr14')
+    if atr14 is not None:
+        if atr14 > 2:
+            signal_analysis['atr_signal'] = '高波动'
+        elif atr14 < 0.5:
+            signal_analysis['atr_signal'] = '低波动'
+        else:
+            signal_analysis['atr_signal'] = '正常波动'
+    
+    # 2. 构建最新指标字典    
+    latest_metrics_dict = {
+        'date': latest_ohlcv['trade_date'].strftime('%Y-%m-%d'),
+        'close': latest_ohlcv['close'],
+        'volume': latest_ohlcv['vol'],
+        'price_change_pct': latest_ohlcv['daily_price_change_pct'],
+        'volume_change_pct': latest_ohlcv['daily_volume_change_pct'],
+        'technical_signals': signal_analysis,
+        'daily_technical_indicators': {'rsi': latest_ohlcv.get('daily_rsi6'),
+                                'macd_diff': latest_ohlcv.get('daily_macd_diff'),
+                                'macd_dea': latest_ohlcv.get('daily_macd_dea'),
+                                'macd': latest_ohlcv.get('daily_macd'),
+                                'k': latest_ohlcv.get('daily_k'),
+                                'd': latest_ohlcv.get('daily_d'),
+                                'j': latest_ohlcv.get('daily_j'),
+                                'boll_mid': latest_ohlcv.get('daily_boll_mid'),
+                                'boll_upper': latest_ohlcv.get('daily_boll_upper'),
+                                'boll_lower': latest_ohlcv.get('daily_boll_lower'),
+                                'cci': latest_ohlcv.get('daily_cci'),
+                                'atr14': latest_ohlcv.get('daily_atr14'),
+                                'bias6': latest_ohlcv.get('daily_bias6'),
+                                'bias12': latest_ohlcv.get('daily_bias12')}
+    }
+    return latest_metrics_dict
+
+def analyze_intraday_metrics(df_intraday: pd.DataFrame) -> dict:
+    """
+    分析分钟K线数据，计算最新指标值
+    
+    Args:
+        df_intraday: 分钟K线数据的DataFrame
+        
+    Returns:
+        dict: 最新指标值字典
+    """
+    if df_intraday.empty:
+        return {
+            'price_change_pct': None,
+            'volume_change_pct': None,
+            'intraday_technical_indicators': {
+                'rsi_30min': None,
+                'rsi_60min': None,
+                'rsi_120min': None,
+                'macd_diff': None,
+                'macd_dea': None,
+                'macd': None,
+                'k': None,
+                'd': None,
+                'j': None,
+                'boll_120min_mid': None,
+                'boll_120min_upper': None,
+                'boll_120min_lower': None,
+                'cci': None,
+                'atr_120min': None
+            }
+        }
+    df_intraday['trade_time'] = pd.to_datetime(df_intraday['trade_time'])
+    df_intraday = df_intraday.sort_values(by='trade_time').reset_index(drop=True)
+
+    # 计算技术指标
+    df_intraday['intraday_volume_change_pct'] = df_intraday['volume'].pct_change() * 100
+    df_intraday['intraday_price_change_pct'] = df_intraday['close'].pct_change() * 100
+
+    # MACD
+    ema12 = df_intraday['close'].ewm(span=12, adjust=False).mean()
+    ema26 = df_intraday['close'].ewm(span=26, adjust=False).mean()
+    df_intraday['intraday_macd_diff'] = ema12 - ema26
+    df_intraday['intraday_macd_dea'] = df_intraday['intraday_macd_diff'].ewm(span=9, adjust=False).mean()
+    df_intraday['intraday_macd'] = 2 * (df_intraday['intraday_macd_diff'] - df_intraday['intraday_macd_dea'])
+
+    # KDJ
+    low_n = df_intraday['low'].rolling(window=9, min_periods=1).min()
+    high_n = df_intraday['high'].rolling(window=9, min_periods=1).max()
+    rsv = (df_intraday['close'] - low_n) / (high_n - low_n) * 100
+    df_intraday['intraday_k'] = rsv.ewm(com=2).mean()
+    df_intraday['intraday_d'] = df_intraday['intraday_k'].ewm(com=2).mean()
+    df_intraday['intraday_j'] = 3 * df_intraday['intraday_k'] - 2 * df_intraday['intraday_d']
+
+    # RSI
+    def calc_rsi(series, period):
+        delta = series.diff()
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        avg_gain = pd.Series(gain).rolling(window=period).mean()
+        avg_loss = pd.Series(loss).rolling(window=period).mean()
+        rs = avg_gain / (avg_loss + 1e-10)
+        return 100 - (100 / (1 + rs))
+
+    df_intraday['intraday_rsi_30min'] = calc_rsi(df_intraday['close'], 6)
+    df_intraday['intraday_rsi_60min'] = calc_rsi(df_intraday['close'], 12)
+    df_intraday['intraday_rsi_120min'] = calc_rsi(df_intraday['close'], 24)
+
+    # BOLL（布林带）
+    ma24 = df_intraday['close'].rolling(window=24).mean()
+    std24 = df_intraday['close'].rolling(window=24).std()
+    df_intraday['intraday_boll_120min_mid'] = ma24
+    df_intraday['intraday_boll_120min_upper'] = ma24 + 2 * std24
+    df_intraday['intraday_boll_120min_lower'] = ma24 - 2 * std24
+
+    # CCI（顺势指标）
+    tp = (df_intraday['high'] + df_intraday['low'] + df_intraday['close']) / 3
+    ma_tp = tp.rolling(window=14).mean()
+    md = tp.rolling(window=14).apply(lambda x: np.mean(np.abs(x - x.mean())))
+    df_intraday['intraday_cci'] = (tp - ma_tp) / (0.015 * md)
+
+    # ATR（平均真实波幅）
+    high_low = df_intraday['high'] - df_intraday['low']
+    high_close = pd.Series(np.abs(df_intraday['high'] - df_intraday['close'].shift()), index=df_intraday.index)
+    low_close = pd.Series(np.abs(df_intraday['low'] - df_intraday['close'].shift()), index=df_intraday.index)
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df_intraday['intraday_atr_120min'] = tr.rolling(window=24).mean()
+
+    # 清理 NaN -> None 
+    df_intraday = df_intraday.replace({np.nan: None})
+    latest_intraday = df_intraday.iloc[-1]
+    
+    latest_metrics_dict = {
+        'price_change_pct': latest_intraday['intraday_price_change_pct'],
+        'volume_change_pct': latest_intraday['intraday_volume_change_pct'],
+        'intraday_technical_indicators': {
+            'rsi_30min': latest_intraday.get('intraday_rsi_30min'),
+            'rsi_60min': latest_intraday.get('intraday_rsi_60min'),
+            'rsi_120min': latest_intraday.get('intraday_rsi_120min'),
+            'macd_diff': latest_intraday.get('intraday_macd_diff'),
+            'macd_dea': latest_intraday.get('intraday_macd_dea'),
+            'macd': latest_intraday.get('intraday_macd'),
+            'k': latest_intraday.get('intraday_k'),
+            'd': latest_intraday.get('intraday_d'),
+            'j': latest_intraday.get('intraday_j'),
+            'boll_120min_mid': latest_intraday.get('intraday_boll_120min_mid'),
+            'boll_120min_upper': latest_intraday.get('intraday_boll_120min_upper'),
+            'boll_120min_lower': latest_intraday.get('intraday_boll_120min_lower'),
+            'cci': latest_intraday.get('intraday_cci'),
+            'atr_120min': latest_intraday.get('intraday_atr_120min')
+        }
+    }
+    return latest_metrics_dict
+
+
+
+
+
+
+
 
 @app.post("/analyze")
-def analyze(request: AnalyzeRequest):
+def analyze(request: AnalyzeRequest, today: Optional[datetime] = None):
     try:
         # 使用集成的数据获取函数
-        daily_path, intraday_path = get_stock_data(request.stock_code)
-        
-        # 读取日K线数据
-        df_daily = pd.read_csv(daily_path)
-        required_daily_columns = ['trade_date', 'open', 'high', 'low', 'close', 'vol']
-        missing_columns = [col for col in required_daily_columns if col not in df_daily.columns]
-        if missing_columns:
-            raise ValueError(f"日频 OHLCV 数据缺少必要列: {missing_columns}")
+        df_daily, df_intraday = get_stock_data(request.stock_code, today)
+        if df_daily.empty and df_intraday.empty:
+            raise ValueError(f"获取股票 {request.stock_code} 的数据失败，请检查股票代码或网络连接。")
+        # 分析日K线数据
+        latest_metrics_dict = analyze_daily_metrics(df_daily)
+        # 分析分钟K线数据
+        latest_intraday_metrics_dict = analyze_intraday_metrics(df_intraday)
+        # 合并日K线和分钟K线的指标
+        latest_metrics_dict.update(latest_intraday_metrics_dict)
+        # 添加股票代码
+        latest_metrics_dict['stock_code'] = request.stock_code
+        # 添加当前时间戳
+        today = today or datetime.now()
+        latest_metrics_dict['timestamp'] = today.strftime('%Y-%m-%d %H:%M:%S')
 
-        if df_daily.empty:
-            raise ValueError("日频 OHLCV 数据不能为空")
 
-        df_daily['trade_date'] = pd.to_datetime(df_daily['trade_date'], format="%Y%m%d")
-        df_daily = df_daily.sort_values(by='trade_date').reset_index(drop=True)
-
-        #计算技术指标_______________________________________________________________________________________________
-        # 均线指标
-        df_daily['daily_ma5'] = df_daily['close'].rolling(window=5, min_periods=1).mean()
-        df_daily['daily_ma10'] = df_daily['close'].rolling(window=10, min_periods=1).mean()
-        df_daily['daily_ma20'] = df_daily['close'].rolling(window=20, min_periods=1).mean()
-
-        # 成交量与价格变化率
-        df_daily['daily_volume_change_pct'] = df_daily['vol'].pct_change() * 100
-        df_daily['daily_price_change_pct'] = df_daily['close'].pct_change() * 100
-
-        # -------------------- 技术指标扩展 --------------------
-
-        # MACD
-        ema12 = df_daily['close'].ewm(span=12, adjust=False).mean()
-        ema26 = df_daily['close'].ewm(span=26, adjust=False).mean()
-        df_daily['daily_macd_diff'] = ema12 - ema26
-        df_daily['daily_macd_dea'] = df_daily['daily_macd_diff'].ewm(span=9, adjust=False).mean()
-        df_daily['daily_macd'] = 2 * (df_daily['daily_macd_diff'] - df_daily['daily_macd_dea'])
-
-        # KDJ
-        low_n = df_daily['low'].rolling(window=9, min_periods=1).min()
-        high_n = df_daily['high'].rolling(window=9, min_periods=1).max()
-        rsv = (df_daily['close'] - low_n) / (high_n - low_n) * 100
-        df_daily['daily_k'] = rsv.ewm(com=2).mean()
-        df_daily['daily_d'] = df_daily['daily_k'].ewm(com=2).mean()
-        df_daily['daily_j'] = 3 * df_daily['daily_k'] - 2 * df_daily['daily_d']
-
-        # RSI
-        def calc_rsi(series, period):
-            delta = series.diff()
-            gain = np.where(delta > 0, delta, 0)
-            loss = np.where(delta < 0, -delta, 0)
-            avg_gain = pd.Series(gain).rolling(window=period).mean()
-            avg_loss = pd.Series(loss).rolling(window=period).mean()
-            rs = avg_gain / (avg_loss + 1e-10)
-            return 100 - (100 / (1 + rs))
-
-        df_daily['daily_rsi6'] = calc_rsi(df_daily['close'], 6)
-        df_daily['daily_rsi12'] = calc_rsi(df_daily['close'], 12)
-        df_daily['daily_rsi24'] = calc_rsi(df_daily['close'], 24)
-
-        # BOLL（布林带）
-        ma20 = df_daily['close'].rolling(window=20).mean()
-        std20 = df_daily['close'].rolling(window=20).std()
-        df_daily['daily_boll_mid'] = ma20
-        df_daily['daily_boll_upper'] = ma20 + 2 * std20
-        df_daily['daily_boll_lower'] = ma20 - 2 * std20
-
-        # BIAS（乖离率）
-        df_daily['daily_bias6'] = (df_daily['close'] - df_daily['close'].rolling(window=6).mean()) / df_daily['close'].rolling(window=6).mean() * 100
-        df_daily['daily_bias12'] = (df_daily['close'] - df_daily['close'].rolling(window=12).mean()) / df_daily['close'].rolling(window=12).mean() * 100
-
-        # CCI（顺势指标）
-        tp = (df_daily['high'] + df_daily['low'] + df_daily['close']) / 3
-        ma_tp = tp.rolling(window=14).mean()
-        md = tp.rolling(window=14).apply(lambda x: np.mean(np.abs(x - x.mean())))
-        df_daily['daily_cci'] = (tp - ma_tp) / (0.015 * md)
-
-        # ATR（平均真实波幅）
-        high_low = df_daily['high'] - df_daily['low']
-        high_close = pd.Series(np.abs(df_daily['high'] - df_daily['close'].shift()), index=df_daily.index)
-        low_close = pd.Series(np.abs(df_daily['low'] - df_daily['close'].shift()), index=df_daily.index)
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        df_daily['daily_atr14'] = tr.rolling(window=14).mean()
-
-        # 清理 NaN -> None 
-        df_daily = df_daily.replace({np.nan: None})
-        
-        #____________________________________________________________________________________________
-
-        df_industry = pd.read_csv(io.StringIO(request.industry_text))
-        if len(df_industry) != 1:
-            raise ValueError("industry_data CSV 必须只有一行数据")
-        industry_data_dict = df_industry.iloc[0].to_dict()
-
-        latest_ohlcv = df_daily.iloc[-1]
-        industry_comparison = {}
-
-        # 1. 均线与成交量比较
-        for key in ['daily_ma5', 'daily_ma10', 'daily_rsi6']:
-            bench = industry_data_dict.get(key)
-            if bench and not np.isnan(bench):
-                industry_comparison[f'{key}_diff_pct'] = ((latest_ohlcv[key] - bench) / bench) * 100
-            else:
-                industry_comparison[f'{key}_diff_pct'] = None
-
-        bench_vol = industry_data_dict.get('avg_volume')
-        if bench_vol and not np.isnan(bench_vol):
-            industry_comparison['daily_volume_diff_pct'] = ((latest_ohlcv['vol'] - bench_vol) / bench_vol) * 100
-        else:
-            industry_comparison['daily_volume_diff_pct'] = None
-
-        # 2. 技术信号识别
-        signal_analysis = {}
-
-        # RSI 信号：超买 >70，超卖 <30
-        rsi = latest_ohlcv.get('daily_rsi6')
-        if rsi is not None:
-            if rsi > 70:
-                signal_analysis['rsi_signal'] = '超买'
-            elif rsi < 30:
-                signal_analysis['rsi_signal'] = '超卖'
-            else:
-                signal_analysis['rsi_signal'] = '中性'
-
-        # MACD 金叉死叉判断
-        macd = latest_ohlcv.get('daily_macd')
-        macd_diff = latest_ohlcv.get('daily_macd_diff')
-        macd_dea = latest_ohlcv.get('daily_macd_dea')
-        if macd_diff is not None and macd_dea is not None:
-            prev = df_daily.iloc[-2]
-            prev_diff = prev.get('daily_macd_diff')
-            prev_dea = prev.get('daily_macd_dea')
-            if prev_diff is not None and prev_dea is not None:
-                if prev_diff < prev_dea and macd_diff > macd_dea:
-                    signal_analysis['macd_signal'] = '金叉'
-                elif prev_diff > prev_dea and macd_diff < macd_dea:
-                    signal_analysis['macd_signal'] = '死叉'
-                else:
-                    signal_analysis['macd_signal'] = '无明显信号'
-
-        # KDJ 判断：J 值极端代表短期拐点
-        j = latest_ohlcv.get('daily_j')
-        if j is not None:
-            if j > 100:
-                signal_analysis['kdj_signal'] = '超买拐点'
-            elif j < 0:
-                signal_analysis['kdj_signal'] = '超卖拐点'
-            else:
-                signal_analysis['kdj_signal'] = '中性'
-
-        # 3. 最新指标字典整合
-        latest_metrics_dict = {
-            'date': latest_ohlcv['trade_date'].strftime('%Y-%m-%d'),
-            'close': latest_ohlcv['close'],
-            'volume': latest_ohlcv['vol'],
-            'price_change_pct': latest_ohlcv['daily_price_change_pct'],
-            'volume_change_pct': latest_ohlcv['daily_volume_change_pct'],
-            'industry_comparison': industry_comparison,
-            'technical_signals': signal_analysis,
-        }
-
-        # 附加指标值（如均线、RSI、MACD 等）加入 latest_metrics_dict
-        for col in ['daily_ma5', 'daily_ma10', 'daily_ma20', 'daily_rsi6', 'daily_macd', 'daily_macd_diff', 'daily_macd_dea', 'daily_k', 'daily_d', 'daily_j']:
-            val = latest_ohlcv.get(col)
-            latest_metrics_dict[col] = None if pd.isna(val) else float(val)
-
-        # 数据清洗
-        for k, v in latest_metrics_dict.items():
-            if isinstance(v, dict):
-                for sub_k, sub_v in v.items():
-                    if pd.isna(sub_v):
-                        v[sub_k] = None
-            elif pd.isna(v):
-                latest_metrics_dict[k] = None
-            elif isinstance(v, (np.integer)):
-                latest_metrics_dict[k] = int(v)
-            elif isinstance(v, (np.floating, np.float64)):
-                latest_metrics_dict[k] = float(v)
-
-        # processed_data_list = df_daily.replace({np.nan: None}).to_dict(orient='records')
         latest_metrics_string = json.dumps(latest_metrics_dict, ensure_ascii=False, indent=2)
-
-        # return {
-        #     "processed_data": processed_data_list,
-        #     "latest_metrics": latest_metrics_string
-        # }
         return {"latest_metrics": latest_metrics_string}
-
-
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=f"数据处理错误: {str(ve)}")
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"代码执行遇到意外问题: {str(e)}")
 
@@ -295,5 +449,14 @@ if __name__ == "__main__":
                 print("⚠️ 回测日期格式错误，使用当前日期")
         
         # 只获取数据
-        daily_path, intraday_path = get_stock_data(args.code, today)
-        print(f"📝 数据获取完成: \n- 日K线: {daily_path} \n- 分钟K线: {intraday_path}")
+        df_daily, df_intraday = get_stock_data(args.code, today)
+        output_path1 = f"./temp/kline_{args.code}.csv"
+        os.makedirs("temp", exist_ok=True)
+        df_daily.to_csv(output_path1, index=False)
+        print(f"成功保存：{output_path1}")
+        
+        end_dt = today or datetime.now()
+        suffix = end_dt.strftime('%Y%m%d')
+        output_path = f"./temp/intraday_{args.code}_{suffix}_5min.csv"
+        df_intraday.to_csv(output_path, index=False, encoding='utf-8-sig')
+        print(f"✅ 已保存至：{output_path}")

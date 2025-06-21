@@ -43,7 +43,7 @@ def get_last_n_trading_days_precise(end_datetime: datetime, n=5, today: Optional
 
     return start_time, end_time
 
-def get_kline_mairui_5min(stock_code: str, today: Optional[datetime] = None):
+def get_kline_mairui_5min(stock_code: str, today: Optional[datetime] = None) -> pd.DataFrame:
     ts_code = format_mairui_code(stock_code)
     end_dt = today or datetime.now()
     start_time, end_time = get_last_n_trading_days_precise(end_dt, n=5, today=today)
@@ -66,13 +66,13 @@ def get_kline_mairui_5min(stock_code: str, today: Optional[datetime] = None):
         if isinstance(json_data, dict):
             if json_data.get("code") != 200:
                 print(f"❌ 接口错误：{json_data.get('msg')}")
-                return
+                raise ValueError(f"接口错误：{json_data.get('msg')}")
             data = json_data.get('data', [])
         elif isinstance(json_data, list):
             data = json_data
         else:
             print("❌ 未知的返回格式")
-            return
+            raise ValueError("未知的返回格式")
 
         df = pd.DataFrame(data)
 
@@ -83,14 +83,11 @@ def get_kline_mairui_5min(stock_code: str, today: Optional[datetime] = None):
         df['trade_time'] = pd.to_datetime(df['trade_time'])
         df = df[['trade_time', 'open', 'high', 'low', 'close', 'volume']]
         df.sort_values('trade_time', inplace=True)
-
-        os.makedirs("data", exist_ok=True)
-        suffix = end_dt.strftime('%Y%m%d')
-        output_path = f"./temp/intraday_{stock_code}_{suffix}_5min.csv"
-        df.to_csv(output_path, index=False, encoding='utf-8-sig')
-        print(f"✅ 已保存至：{output_path}")
+        return df
+        
     except Exception as e:
         print(f"❗ 请求失败：{e}")
+        return pd.DataFrame()
 
 # 示例调用
 if __name__ == "__main__":
@@ -100,4 +97,9 @@ if __name__ == "__main__":
     # today = datetime(2024, 5, 22, 15, 0, 0)  # 回测用
     today = None
 
-    get_kline_mairui_5min(stock_code, today=None)
+    df = get_kline_mairui_5min(stock_code, today=None)
+    end_dt = today or datetime.now()
+    suffix = end_dt.strftime('%Y%m%d')
+    output_path = f"./temp/intraday_{stock_code}_5min.csv"
+    df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    print(f"✅ 已保存至：{output_path}")
