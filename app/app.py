@@ -10,34 +10,56 @@ from datetime import datetime, timedelta
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
-# 打印当前工作目录和字体目录内容（调试用）
-print(f"Current working directory: {os.getcwd()}")
-print(f"Font directory contents: {os.listdir('/usr/share/fonts/custom')}")
-# 查找可用的中文字体
-chinese_font_path = None
-# 优先查找 SimHei 字体
-possible_fonts = [
-    '/usr/share/fonts/custom/SimHei.ttf',      # 我们的首选
-    '/usr/share/fonts/custom/SIMFANG.ttf',     # 备用
-    '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # Debian/Ubuntu默认
-    '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',   # Alpine
-    '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc' # Google Noto
-]
-for font in possible_fonts:
-    if os.path.exists(font):
-        chinese_font_path = font
-        print(f"✅ 找到字体文件: {font}")
-        break
-if chinese_font_path:
-    # 添加到字体管理器
-    prop = font_manager.FontProperties(fname=chinese_font_path)
-    plt.rcParams['font.family'] = prop.get_name()
-    print(f"🌏 设置中文字体: {prop.get_name()}")
-else:
-    print("⚠️ 未找到中文字体文件，使用默认字体")
-    plt.rcParams['font.family'] = ['sans-serif']
-    plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Liberation Sans']
-plt.rcParams['axes.unicode_minus'] = False
+import platform
+# 自动适配中英文字体，兼容 Linux 和 Windows，增强健壮性
+def setup_chinese_font():
+    system = platform.system().lower()
+    chinese_font_path = None
+
+    if system == "windows":
+        # Windows 常见中文字体
+        possible_fonts = [
+            "SimHei", "Microsoft YaHei", "SimSun", "Arial Unicode MS"
+        ]
+        for font in possible_fonts:
+            try:
+                plt.rcParams['font.sans-serif'] = [font]
+                # 测试能否正常显示中文
+                plt.figure()
+                plt.text(0.5, 0.5, "中文字体测试", fontsize=12)
+                plt.close()
+                print(f"✅ Windows: 使用字体: {font}")
+                break
+            except Exception as e:
+                continue
+        else:
+            print("⚠️ Windows: 未找到合适的中文字体，使用默认字体")
+    else:
+        # Linux 常见中文字体路径
+        possible_fonts = [
+            '/usr/share/fonts/custom/SimHei.ttf',
+            '/usr/share/fonts/custom/SIMFANG.ttf',
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',
+            '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc'
+        ]
+        for font in possible_fonts:
+            if os.path.exists(font):
+                chinese_font_path = font
+                print(f"✅ Linux: 找到字体文件: {font}")
+                break
+        if chinese_font_path:
+            prop = font_manager.FontProperties(fname=chinese_font_path)
+            plt.rcParams['font.family'] = prop.get_name()
+            plt.rcParams['font.sans-serif'] = [prop.get_name()]
+            print(f"🌏 Linux: 设置中文字体: {prop.get_name()}")
+        else:
+            print("⚠️ Linux: 未找到中文字体文件，使用默认字体")
+            plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Liberation Sans']
+
+    plt.rcParams['axes.unicode_minus'] = False
+
+setup_chinese_font()
 
 # ------------------------- 配置参数 -------------------------
 DIFY_HOST = os.getenv("DIFY_HOST", "http://monitor:5001")

@@ -2,7 +2,6 @@ import requests
 import pandas as pd
 import os
 from datetime import datetime, timedelta
-import tushare as ts
 from typing import Optional
 
 # 配置
@@ -11,7 +10,6 @@ MAIRUI_LICENCE = "9914AFE5-493E-41DD-9C02-4F7145666C13"
 def format_mairui_code(code: str):
     return code + ".SH" if code.startswith("6") else code + ".SZ"
 
-from akshare import tool_trade_date_hist_sina
 
 def get_last_n_trading_days_precise(end_datetime: datetime, n=5, today: Optional[datetime] = None) -> tuple[str, str]:
     """
@@ -19,11 +17,15 @@ def get_last_n_trading_days_precise(end_datetime: datetime, n=5, today: Optional
     start = 第一个交易日的09:30:00
     end   = 若 today 为 None 则为当前时间；否则为 today 的 15:00:00
     """
-    trade_dates = tool_trade_date_hist_sina()
-    # 过滤掉不是日期格式的元素（如表头等）
-    trade_dates = [d for d in trade_dates if isinstance(d, str) and len(d) == 10 and d[4] == '-' and d[7] == '-']
-    trade_dates = [d for d in trade_dates if datetime.strptime(d, '%Y-%m-%d') <= end_datetime]
-    trade_dates = [d.replace('-', '') for d in trade_dates]
+    # 使用 jqdata 获取交易日历
+    from jqdatasdk import auth, get_trade_days
+    auth('18192108075', 'Zbx08170715')  # 替换为你的聚宽账号和密码
+
+    if end_datetime is None:
+        end_datetime = datetime.today()
+    end_dt_str = end_datetime.strftime('%Y-%m-%d')
+    trade_days = get_trade_days(end_date=end_dt_str, count=n)
+    trade_dates = [pd.to_datetime(d).strftime('%Y%m%d') for d in trade_days]
 
     if len(trade_dates) < n:
         raise ValueError("交易日数量不足")
@@ -43,7 +45,9 @@ def get_kline_mairui_5min(stock_code: str, today: Optional[datetime] = None):
     ts_code = format_mairui_code(stock_code)
     end_dt = today or datetime.now()
     start_time, end_time = get_last_n_trading_days_precise(end_dt, n=5, today=today)
-
+    print(f"📅 获取数据时间范围：{start_time} - {end_time}"
+          f"（股票代码：{stock_code}）")
+    
     url = (
         f"https://api.mairuiapi.com/hsstock/history/"
         f"{ts_code}/5/n/{MAIRUI_LICENCE}"
@@ -56,11 +60,19 @@ def get_kline_mairui_5min(stock_code: str, today: Optional[datetime] = None):
         response.raise_for_status()
         json_data = response.json()
 
-        if json_data.get("code") != 200:
-            print(f"❌ 接口错误：{json_data.get('msg')}")
+        # 兼容返回为 dict 或 list 的情况
+        if isinstance(json_data, dict):
+            if json_data.get("code") != 200:
+                print(f"❌ 接口错误：{json_data.get('msg')}")
+                return
+            data = json_data.get('data', [])
+        elif isinstance(json_data, list):
+            data = json_data
+        else:
+            print("❌ 未知的返回格式")
             return
 
-        df = pd.DataFrame(json_data['data'])
+        df = pd.DataFrame(data)
 
         df.rename(columns={
             "t": "trade_time", "o": "open", "h": "high",
