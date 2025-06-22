@@ -10,6 +10,8 @@ services:
       - "127.0.0.1:5001:5001"
     environment:
       DIFY_BASE_URL: "https://api.dify.ai/v1"
+      DIFY_NEWS_FLOW_ID: #TODO
+      DIFY_NEWS_API_KEY: #TODO
       STOCK_ASSISTANT_API_KEY: "你的apikey" #TODO
       STOCK_ASSISTANT_FLOW_ID: "你的flowid" #TODO
       DEEPSEEK_API_KEY: "你的deepseekkey" #TODO
