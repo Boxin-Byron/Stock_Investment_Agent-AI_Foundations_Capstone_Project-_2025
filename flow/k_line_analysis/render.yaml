@@ -4,10 +4,7 @@ services:
     env: python
     plan: free
     # 构建命令：安装系统依赖和Python包
-    buildCommand: |
-      apt-get update && 
-      apt-get install -y gcc build-essential curl && 
-      pip install --no-cache-dir -r requirements.txt
+    buildCommand: pip install -r requirements.txt
     # 启动命令：与Dockerfile保持一致
     startCommand: python main.py --mode api
     # 环境变量配置
