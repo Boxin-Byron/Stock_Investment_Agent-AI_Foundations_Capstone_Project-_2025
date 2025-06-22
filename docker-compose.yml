@@ -1,0 +1,59 @@
+# version: '3.8'
+name: stock-investment-agent
+
+services:
+  monitor:
+    build:
+      context: ./monitor
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:5001:5001"
+    environment:
+      PORT: 5001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # 添加重启策略
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:7860:7860"
+    environment:
+      DIFY_HOST: "http://monitor:5001"
+      PYTHONUNBUFFERED: 1  # <-- 添加这一行来禁用输出缓冲
+      GRADIO_SERVER_NAME: "0.0.0.0"
+    depends_on:
+      monitor:
+        condition: service_healthy
+    # 添加重启策略
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ./app/data
+        target: /app/data
+      - type: bind
+        source: ./app/config
+        target: /app/config
+
+  k_line_analysis:
+    build:
+      context: ./flow/k_line_analysis
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ./flow/k_line_analysis/temp
+        target: /app/temp
+
+networks:
+  default:
+    name: stock-network

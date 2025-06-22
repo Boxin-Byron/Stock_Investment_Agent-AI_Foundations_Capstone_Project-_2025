@@ -1,0 +1,8 @@
+fastapi==0.115.13
+jqdatasdk==1.9.7
+numpy==2.3.1
+pandas==2.3.0
+pydantic==2.11.7
+Requests==2.32.4
+tushare==1.4.21
+uvicorn==0.34.3

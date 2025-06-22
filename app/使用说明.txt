@@ -1,0 +1,2 @@
+cd fronted
+python app.py

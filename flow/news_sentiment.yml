@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 app:
   description: 用于分析新闻情绪，抓取新闻标题摘要并进行情感倾向分析和关键词提取
   icon: 🤖
@@ -311,3 +312,261 @@ workflow:
       x: -668.5712598056855
       y: 155.60983959847175
       zoom: 0.8572439828530727
+=======
+app:
+  description: 用于分析新闻情绪，抓取新闻标题摘要并进行情感倾向分析和关键词提取
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: workflow
+  name: 新闻情绪分析应用
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/siliconflow:0.0.15@65d5382cd2c25d45f3bffc1d20a8433588f9f0d7463eab15d5fad034c6a55c40
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/serper:0.0.2@4e0d70360c68b17b7504b65f6f14ecd00a40b8b138b716ff72f3bfd8139961ab
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: tool
+      id: 1748505732254-source-1748507597303-target
+      source: '1748505732254'
+      sourceHandle: source
+      target: '1748507597303'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: tool
+        targetType: llm
+      id: 1748507597303--1748507785442-target
+      source: '1748507597303'
+      sourceHandle: source
+      target: '1748507785442'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: end
+      id: 1748507785442-source-1748508187351-target
+      source: '1748507785442'
+      sourceHandle: source
+      target: '1748508187351'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 开始
+        type: start
+        variables: []
+      height: 54
+      id: '1748505732254'
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        is_team_authorization: true
+        output_schema: null
+        paramSchemas:
+        - auto_generate: null
+          default: null
+          form: llm
+          human_description:
+            en_US: used for searching
+            ja_JP: used for searching
+            pt_BR: used for searching
+            zh_Hans: 用于搜索网页内容
+          label:
+            en_US: Query string
+            ja_JP: Query string
+            pt_BR: Query string
+            zh_Hans: 查询语句
+          llm_description: key words for searching
+          max: null
+          min: null
+          name: query
+          options: []
+          placeholder: null
+          precision: null
+          required: true
+          scope: null
+          template: null
+          type: string
+        params:
+          query: ''
+        provider_id: langgenius/serper/serper
+        provider_name: langgenius/serper/serper
+        provider_type: builtin
+        selected: false
+        title: Serper
+        tool_configurations: {}
+        tool_description: 一个用于执行 Google 搜索并提取片段和网页的工具。输入应该是一个搜索查询。
+        tool_label: Serper
+        tool_name: serper
+        tool_parameters:
+          query:
+            type: mixed
+            value: 最近 7 天股票市场重要新闻标题摘要
+        type: tool
+      height: 54
+      id: '1748507597303'
+      position:
+        x: 383
+        y: 282
+      positionAbsolute:
+        x: 383
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: Pro/deepseek-ai/DeepSeek-R1
+          provider: langgenius/siliconflow/siliconflow
+        prompt_template:
+        - id: d0c73147-afa6-4fe5-a19b-c55ae922d464
+          role: system
+          text: '请对以下新闻进行分析：
+
+            1. 提取每条新闻的情感倾向（正向/中性/负向，用数值打分：-1到1，-1为负向，0为中性，1为正向）
+
+            2. 提取新闻中的关键事件或主题（如政策变动、公司财报、市场波动等）
+
+            输出格式必须为JSON：{"sentiment_score": 平均情感得分, "key_events": [关键事件列表]}
+
+            注意：情感得分需计算所有新闻的平均值，保留两位小数；关键事件需去重合并。'
+        selected: false
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              key_events:
+                type: number
+              sentiment_score:
+                type: number
+            required: []
+            type: object
+        structured_output_enabled: true
+        title: LLM
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 90
+      id: '1748507785442'
+      position:
+        x: 663
+        y: 282
+      positionAbsolute:
+        x: 663
+        y: 282
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        desc: ''
+        outputs: []
+        selected: false
+        title: 结束
+        type: end
+      height: 54
+      id: '1748508187351'
+      position:
+        x: 989
+        y: 282
+      positionAbsolute:
+        x: 989
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 708.0000000000001
+      y: 145.5
+      zoom: 0.9999999999999999
+>>>>>>> 73d6c3e4de9e46dd3340d4a078a33409c8891168
