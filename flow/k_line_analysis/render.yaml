@@ -3,8 +3,29 @@ services:
     name: k_line_analysis
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    # 构建命令：安装系统依赖和Python包
+    buildCommand: |
+      apt-get update && 
+      apt-get install -y gcc build-essential curl && 
+      pip install --no-cache-dir -r requirements.txt
+    # 启动命令：与Dockerfile保持一致
+    startCommand: python main.py --mode api
+    # 环境变量配置
     envVars:
       - key: PORT
-        value: 10000
+        value: 8000
+      - key: PYTHONUNBUFFERED
+        value: 1
+      # API认证信息（从环境变量获取，如果未设置则使用默认值）
+      - key: TUSHARE_TOKEN
+        sync: false  # 标记为敏感信息，不在日志中显示
+      - key: MAIRUI_LICENCE
+        sync: false
+      - key: JQ_USERNAME
+        sync: false
+      - key: JQ_PASSWORD
+        sync: false
+    # 健康检查
+    healthCheckPath: /healthz
+    # 自动部署设置
+    autoDeploy: false
