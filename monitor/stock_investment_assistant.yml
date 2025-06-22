@@ -1,0 +1,370 @@
+app:
+  description: 综合分析K线数据计算结果与新闻情绪
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  mode: advanced-chat
+  name: 股票分析助手
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/siliconflow:0.0.15@65d5382cd2c25d45f3bffc1d20a8433588f9f0d7463eab15d5fad034c6a55c40
+kind: app
+version: 0.3.0
+workflow:
+  conversation_variables:
+  - description: ''
+    id: 26f49036-ce8d-4414-a13a-8e15c4154359
+    name: risk_appetite
+    selector:
+    - conversation
+    - risk_appetite
+    value: neutral
+    value_type: string
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: 你好，我是你的股票分析助手，将根据你选择的股票，从技术面与新闻两方面进行投资分析，为你给出投资建议
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: http-request
+      id: 1750511886195-source-1750514234669-target
+      selected: false
+      source: '1750511886195'
+      sourceHandle: source
+      target: '1750514234669'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: http-request
+      id: 1750511886195-source-1750514709323-target
+      selected: false
+      source: '1750511886195'
+      sourceHandle: source
+      target: '1750514709323'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: llm
+      id: 1750514709323-source-1750527968263-target
+      source: '1750514709323'
+      sourceHandle: source
+      target: '1750527968263'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: http-request
+        targetType: llm
+      id: 1750514234669-source-1750527968263-target
+      source: '1750514234669'
+      sourceHandle: source
+      target: '1750527968263'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: 1750527968263-source-answer-target
+      source: '1750527968263'
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        desc: ''
+        selected: false
+        title: 开始
+        type: start
+        variables:
+        - label: stock_code
+          max_length: 48
+          options: []
+          required: true
+          type: text-input
+          variable: stock_code
+      height: 89
+      id: '1750511886195'
+      position:
+        x: -325.08259810682097
+        y: 169.5369093558021
+      positionAbsolute:
+        x: -325.08259810682097
+        y: 169.5369093558021
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        answer: '{{#1750527968263.text#}}'
+        desc: ''
+        selected: false
+        title: 直接回复
+        type: answer
+        variables: []
+      height: 104
+      id: answer
+      position:
+        x: 1031.994284328371
+        y: 169.5369093558021
+      positionAbsolute:
+        x: 1031.994284328371
+        y: 169.5369093558021
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-423
+            key: ''
+            type: text
+            value: "{\n  \"stock_code\": {{#1750511886195.stock_code#}}\n}"
+          type: json
+        desc: ''
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 调用新闻情绪分析
+        type: http-request
+        url: https://udify.app/workflow/ByEOxH9A7hGalW1N
+        variables: []
+      height: 139
+      id: '1750514234669'
+      position:
+        x: 175.01397469861047
+        y: 302.1187959661106
+      positionAbsolute:
+        x: 175.01397469861047
+        y: 302.1187959661106
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-174
+            key: ''
+            type: text
+            value: "{\n  \"stock_code\": {{#1750511886195.stock_code#}}\n}"
+          type: json
+        desc: ''
+        headers: Content-Type:application/json
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 3
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+        title: 调用K线分析
+        type: http-request
+        url: https://stock-investment-agent-ai-foundations.onrender.com/analyze
+        variables: []
+      height: 155
+      id: '1750514709323'
+      position:
+        x: 175.01397469861047
+        y: 60.65523839677732
+      positionAbsolute:
+        x: 175.01397469861047
+        y: 60.65523839677732
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        desc: ''
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 50
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: Pro/deepseek-ai/DeepSeek-R1
+          provider: langgenius/siliconflow/siliconflow
+        prompt_template:
+        - id: 404ebda8-d7cc-4ae3-964d-71ecb69321ea
+          role: system
+          text: '💼 职位描述：投资分析顾问
+
+            你是一个经验丰富的投资分析顾问，目标是基于已有的新闻情绪分析和技术面（K线）分析结果，提供清晰、专业的投资建议。你不再负责数据抓取或初步分析，而是聚焦在整合、解释和判断，形成最终的投资建议。
+
+            🧠 角色职责
+
+            你的职责是综合已有的分析内容，从多个角度（如情绪倾向、价格走势、交易信号）出发，完成以下任务：
+
+            解读新闻情绪分析结果
+
+            判断当前市场对该股票的情绪总体是正面、中性还是负面。
+
+            提炼新闻中的主要看点和潜在风险/利好因素。
+
+            解读技术面分析结果（K线分析）
+
+            识别近期价格走势（趋势、波动、关键支撑/压力位）。
+
+            判断当前阶段属于上涨、下跌、震荡或关键转折点。
+
+            结合指标信号（如MACD、KDJ、均线等）做出简要判断。
+
+            提供综合投资建议
+
+            综合情绪与技术面，给出明确的投资建议（如：买入、观望、止盈、减仓等）。
+
+            给出判断的逻辑依据和风险提示。
+
+            🔧 输入信息
+
+            你的输入是两个来源（通过其他工作流生成）：
+
+            新闻情绪分析结果：{{#1750514234669.body#}}包括情感分类、主要新闻摘要、看点、情绪总结等。
+
+            K线分析结果：{{#1750514709323.body#}}包括关键技术指标、趋势判断、波动情况等。
+
+            你无需自己抓取数据或调用外部接口。
+
+            用户会对你的投资建议提出反馈，针对用户的反馈调整对于用户风险偏好的评估{{#conversation.risk_appetite#}}
+
+            📋 输出要求
+
+            使用Markdown语法，清晰结构化输出。
+
+            按以下结构输出分析：
+
+            📈 技术面总结
+
+            📰 新闻情绪总结
+
+            ✅ 综合判断与投资建议
+
+            输出应逻辑清晰，避免空泛表述，必须明确给出建议及其依据。
+
+            建议语言风格简洁、专业，适应金融分析类读者。
+
+            ❗ 限制与注意事项
+
+            不要说明你是AI，也不要提及你使用了哪些工具。
+
+            不要重复用户提供的内容，应在其基础上提炼与判断。
+
+            所有输出应使用与用户相同的语言（中/英文自动适应）。'
+        - id: d25970fa-a0cd-4e53-9100-812ec70853cd
+          role: user
+          text: 请为我分析股票代码为{{#1750511886195.stock_code#}}的股票，给出投资建议
+        selected: false
+        title: LLM
+        type: llm
+        variables: []
+        vision:
+          enabled: false
+      height: 89
+      id: '1750527968263'
+      position:
+        x: 682.4894905233946
+        y: 169.5369093558021
+      positionAbsolute:
+        x: 682.4894905233946
+        y: 169.5369093558021
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: -31.497142164185675
+      y: 256.7315453220989
+      zoom: 0.5000000000000002
