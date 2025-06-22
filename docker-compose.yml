@@ -9,7 +9,11 @@ services:
     ports:
       - "127.0.0.1:5001:5001"
     environment:
-      PORT: 5001
+      DIFY_BASE_URL: "https://api.dify.ai/v1"
+      STOCK_ASSISTANT_API_KEY: "你的apikey" #TODO
+      STOCK_ASSISTANT_FLOW_ID: "你的flowid" #TODO
+      DEEPSEEK_API_KEY: "你的deepseekkey" #TODO
+    PORT: 5001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 10s

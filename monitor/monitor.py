@@ -11,14 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # 从环境变量获取配置
 DIFY_BASE_URL = os.getenv("DIFY_BASE_URL", "https://api.dify.ai/v1")
-KLINE_FLOW_ID = os.getenv("DIFY_KLINE_FLOW_ID")
 NEWS_FLOW_ID = os.getenv("DIFY_NEWS_FLOW_ID")
-KLINE_API_KEY = os.getenv("DIFY_KLINE_API_KEY")
 NEWS_API_KEY = os.getenv("DIFY_NEWS_API_KEY")
+
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
+STOCK_ASSISTANT_FLOW_ID = os.getenv('STOCK_ASSISTANT_FLOW_ID')
+
 # 构建工作流调用URL
-KLINE_FLOW_URL = f"{DIFY_BASE_URL}/workflows/run/{KLINE_FLOW_ID}"
+KLINE_FLOW_URL = "https://stock-investment-agent-ai-foundations.onrender.com/analyze"
 NEWS_FLOW_URL = f"{DIFY_BASE_URL}/workflows/run/{NEWS_FLOW_ID}"
 
 app = FastAPI()
@@ -65,27 +66,21 @@ def contains_chinese(text):
 
 
 def call_kline_flow(stock_code):
-    """调用Dify中的K线分析工作流"""
+    """调用K线分析微服务，返回latest_metrics字典"""
     try:
-        headers = {
-            "Authorization": f"Bearer {KLINE_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "input": stock_code,
-            "response_mode": "blocking"
-        }
-        
-        response = requests.post(KLINE_FLOW_URL, json=payload, headers=headers, timeout=15)
+        # 假设K线分析服务运行在本地8000端口
+        url = "http://localhost:8000/analyze"
+        payload = {"stock_code": stock_code}
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
+        # 返回格式为 {"latest_metrics": latest_metrics_string}
         return response.json()
     except Exception as e:
-        # 错误处理：返回带有错误信息的模拟数据
-        print(f"K线分析API错误: {str(e)}")
+        print(f"K线分析服务调用错误: {str(e)}")
+        # 返回模拟数据结构
         return {
-            "score": round(random.uniform(5.0, 9.0), 1),
-            "highlights": [f"API错误: {str(e)}"],
-            "recommendation": random.choice(["观望", "谨慎操作"])
+            "latest_metrics": '{"error": "K线分析服务不可用", "detail": "%s"}' % str(e)
         }
 
 def call_news_flow(stock_code):
@@ -111,6 +106,26 @@ def call_news_flow(stock_code):
             "key_events": [f"API错误: {str(e)}"]
         }
 
+def call_dify_stock_assistant(stock_code: str):
+    """流式调用Dify股票分析助手Chatflow，返回生成器"""
+    try:
+        url = f"{DIFY_BASE_URL}/workflows/run/{STOCK_ASSISTANT_FLOW_ID}"
+        headers = {
+            "Authorization": f"Bearer {os.getSTOCK_ASSISTANT_FLOW_IDenv('STOCK_ASSISTANT_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "input": {"stock_code": stock_code},
+            "response_mode": "streaming"
+        }
+        with requests.post(url, json=payload, headers=headers, stream=True, timeout=60) as response:
+            response.raise_for_status()
+            for chunk in response.iter_content(chunk_size=1024):
+                if chunk:
+                    yield chunk
+    except Exception as e:
+        yield f"流式API错误: {str(e)}".encode("utf-8")
+
 
 @app.get("/health")
 async def health_check():
@@ -129,13 +144,16 @@ def stock_eval(stock_code: str):
         stock_code = get_stock_code_with_deepseek(stock_code)
     kline_result = call_kline_flow(stock_code)
     news_result = call_news_flow(stock_code)
+    assistant_result = b''.join(call_dify_stock_assistant(stock_code)).decode("utf-8")
 
     return {
-        "industry_score": kline_result.get("score"),
-        "kline_summary": kline_result.get("highlights"),
-        "sentiment_score": news_result.get("sentiment_score"),
-        "key_events": news_result.get("key_events"),
-        "recommendation": kline_result.get("recommendation")
+        "stock_code": stock_code,
+        "kline_analysis": kline_result.get("latest_metrics", "{}"),
+        "news_sentiment": {
+            "score": news_result.get("sentiment_score", 0.0),
+            "key_events": news_result.get("key_events", [])
+        },
+        "assistant_analysis": assistant_result
     }
 
 if __name__ == "__main__":
