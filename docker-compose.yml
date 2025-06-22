@@ -18,7 +18,7 @@ services:
       start_period: 5s
     # 添加重启策略
     restart: unless-stopped
-  
+
   app:
     build:
       context: ./app
@@ -42,8 +42,18 @@ services:
         source: ./app/config
         target: /app/config
 
-# 修改网络配置（Windows 专用）
+  k_line_analysis:
+    build:
+      context: ./flow/k_line_analysis
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ./flow/k_line_analysis/temp
+        target: /app/temp
+
 networks:
   default:
     name: stock-network
-   # driver: nat  # 移除这个，在 Windows 上不需要显式指定
