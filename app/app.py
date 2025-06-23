@@ -12,6 +12,7 @@ import csv
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 import platform
+
 # 自动适配中英文字体，兼容 Linux 和 Windows，增强健壮性
 def setup_chinese_font():
     system = platform.system().lower()
@@ -64,8 +65,8 @@ setup_chinese_font()
 
 # ------------------------- 配置参数 -------------------------
 DIFY_HOST = os.getenv("DIFY_HOST", "http://monitor:5001")
-
-
+# 添加模拟模式开关
+USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
 
 def call_stock_eval_api(stock_code):
     """调用后端股票评估API"""
@@ -142,6 +143,9 @@ def mock_kline_data(stock_code):
         "600519": 8.5,
         "000001": 6.2,
         "000002": 4.1,
+        "600000": 7.2,
+        "000858": 5.8,
+        "002415": 6.9,
     }
     
     score = mock_scores.get(stock_code, round(random.uniform(3.0, 9.0), 1))
@@ -167,6 +171,9 @@ def mock_news_sentiment(stock_code):
         "600519": 0.7,
         "000001": 0.1,
         "000002": -0.3,
+        "600000": 0.4,
+        "000858": -0.1,
+        "002415": 0.6,
     }
     
     sentiment = mock_sentiments.get(stock_code, round(random.uniform(-0.8, 0.8), 2))
@@ -187,6 +194,55 @@ def mock_news_sentiment(stock_code):
         "key_events": events
     }
 
+def mock_assistant_analysis(stock_code):
+    """模拟AI助手详细分析"""
+    mock_analyses = {
+        "600519": {
+            "当前建议": "买入",
+            "对未来一周的趋势方向及可能变动幅度估计": "预计上涨3-5%",
+            "支持该判断的主要逻辑证据": "业绩稳定增长；品牌价值持续提升；白酒行业复苏明显",
+            "潜在风险提示": "估值偏高；消费环境不确定性；行业竞争加剧"
+        },
+        "000001": {
+            "当前建议": "持有",
+            "对未来一周的趋势方向及可能变动幅度估计": "震荡整理，变动幅度±2%",
+            "支持该判断的主要逻辑证据": "金融改革受益；资产质量改善；估值相对合理",
+            "潜在风险提示": "利率环境变化；信贷风险；监管政策不确定性"
+        }
+    }
+    
+    default_analysis = {
+        "当前建议": random.choice(["买入", "持有", "卖出"]),
+        "对未来一周的趋势方向及可能变动幅度估计": f"预计{'上涨' if random.random() > 0.5 else '下跌'}{random.randint(1, 8)}%",
+        "支持该判断的主要逻辑证据": "技术面向好；基本面稳定；市场情绪积极",
+        "潜在风险提示": "市场波动；政策变化；业绩不确定性"
+    }
+    
+    analysis = mock_analyses.get(stock_code, default_analysis)
+    
+    # 构建详细建议字符串
+    detailed_recommendation = (
+        f"👉 当前建议: {analysis['当前建议']}\n"
+        f"📅 未来一周趋势: {analysis['对未来一周的趋势方向及可能变动幅度估计']}\n"
+        f"🔎 主要支持证据:\n  - {analysis['支持该判断的主要逻辑证据'].replace('；', chr(10) + '  - ')}\n"
+        f"⚠️ 潜在风险:\n  - {analysis['潜在风险提示'].replace('；', chr(10) + '  - ')}\n"
+        f"\n📝 注意：当前为模拟数据模式"
+    )
+    
+    return {"detailed_recommendation": detailed_recommendation}
+
+def get_stock_data(stock_code, use_mock=False):
+    """统一的数据获取函数，根据模式选择真实数据或模拟数据"""
+    if use_mock:
+        print(f"🎭 使用模拟数据模式分析: {stock_code}")
+        return {
+            "kline_data": mock_kline_data(stock_code),
+            "sentiment_data": mock_news_sentiment(stock_code),
+            "assistant_data": mock_assistant_analysis(stock_code)
+        }
+    else:
+        print(f"🌐 使用真实数据模式分析: {stock_code}")
+        return call_stock_eval_api(stock_code)
 
 def format_kline_display(kline_data):
     """格式化K线数据"""
@@ -306,7 +362,11 @@ def save_user_preference(preference, analysis_context):
     stock_code = analysis_context.get("stock_code", "N/A")
     prediction_direction = analysis_context.get("prediction", {}).get("direction", "N/A")
     
-    filename = "user_preferences.csv"
+    # 使用挂载的数据目录
+    data_dir = "/app/data"
+    os.makedirs(data_dir, exist_ok=True)  # 确保目录存在
+    filename = os.path.join(data_dir, "user_preferences.csv")
+    
     file_exists = os.path.exists(filename)
     
     try:
@@ -325,12 +385,12 @@ def save_user_preference(preference, analysis_context):
             ])
         
         print(f"✅ 用户偏好已保存: {stock_code} - {preference}")
+        print(f"📁 保存路径: {filename}")
         # 返回成功信息，并隐藏反馈区域
         return "✅ 感谢您的反馈！", gr.update(visible=False)
     except Exception as e:
         print(f"❌ 保存用户偏好失败: {e}")
         return f"❌ 保存失败: {e}", gr.update(visible=True)
-
 
 def create_analysis_block(title, default_content):
     """创建分析区块"""
@@ -339,7 +399,7 @@ def create_analysis_block(title, default_content):
         json_display = gr.Json(value=default_content, container=False)
     return block, json_display
 
-def analyze_stock(stock_code):
+def analyze_stock(stock_code, use_mock_data):
     """主分析函数"""
     if not stock_code.strip():
          return [
@@ -352,7 +412,9 @@ def analyze_stock(stock_code):
     
     try:
         print(f"🔍 开始分析股票: {stock_code}")
-        eval_result = call_stock_eval_api(stock_code)
+        
+        # 根据用户选择决定使用真实数据还是模拟数据
+        eval_result = get_stock_data(stock_code, use_mock=use_mock_data)
         
         kline_data = eval_result["kline_data"]
         sentiment_data = eval_result["sentiment_data"]
@@ -391,7 +453,49 @@ def analyze_stock(stock_code):
         ]
         
     except Exception as e:
-        print(f"❌ 股票分析失败: {e}")
+        print(f"❌ 股票分析失败，自动切换到模拟模式: {e}")
+        
+        # 自动降级到模拟数据模式
+        if not use_mock_data:
+            print("🔄 尝试使用模拟数据...")
+            try:
+                eval_result = get_stock_data(stock_code, use_mock=True)
+                
+                kline_data = eval_result["kline_data"]
+                sentiment_data = eval_result["sentiment_data"]
+                assistant_data = eval_result.get("assistant_data", {})
+                
+                prediction = generate_prediction_chart(stock_code)
+                formatted_kline = format_kline_display(kline_data)
+                formatted_sentiment = format_sentiment_display(sentiment_data)
+                
+                short_recommendation = generate_investment_recommendation(
+                    kline_data, sentiment_data, prediction
+                )
+                
+                detailed_recommendation = assistant_data.get("detailed_recommendation", "未获取到详细分析")
+                detailed_recommendation += f"\n\n⚠️ 注意：因后端服务异常，已自动切换至模拟数据模式。"
+                
+                analysis_context = {
+                    "stock_code": stock_code,
+                    "prediction": prediction
+                }
+                
+                return [
+                    formatted_kline,
+                    formatted_sentiment,
+                    prediction["chart"],
+                    prediction["direction"],
+                    prediction["change_rate"],
+                    short_recommendation,
+                    detailed_recommendation,
+                    gr.update(visible=True),  # 显示反馈区域
+                    analysis_context  # 更新状态
+                ]
+                
+            except Exception as fallback_error:
+                print(f"❌ 模拟模式也失败: {fallback_error}")
+        
         return [
             {"error": f"分析失败: {str(e)}"},
             {"error": f"分析失败: {str(e)}"},
@@ -417,13 +521,27 @@ with gr.Blocks(
     gr.Markdown("### 💡 支持股票代码或中文名称输入（如：600519 或 贵州茅台）")
     
     with gr.Row(variant="panel"):
-        stock_input = gr.Textbox(
-            label="股票代码/名称输入",
-            placeholder="输入A股代码（如：600519）或中文名称（如：贵州茅台）",
-            max_lines=1,
-            container=False
-        )
-        analyze_btn = gr.Button("🔍 立即分析", variant="primary", size="md")
+        with gr.Column(scale=3):
+            stock_input = gr.Textbox(
+                label="股票代码/名称输入",
+                placeholder="输入A股代码（如：600519）或中文名称（如：贵州茅台）",
+                max_lines=1,
+                container=False
+            )
+        with gr.Column(scale=1):
+            # 添加数据模式选择
+            mock_data_checkbox = gr.Checkbox(
+                label="使用模拟数据",
+                value=USE_MOCK_DATA,
+                info="勾选此选项将使用模拟数据进行分析"
+            )
+        with gr.Column(scale=1):
+            analyze_btn = gr.Button("🔍 立即分析", variant="primary", size="md")
+    
+    # 显示当前模式
+    mode_status = gr.Markdown(
+        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}"
+    )
     
     with gr.Row(equal_height=True):
         with gr.Column(scale=1, min_width=400):
@@ -487,10 +605,19 @@ with gr.Blocks(
                 submit_feedback_btn = gr.Button("提交反馈", variant="secondary")
                 feedback_status = gr.Markdown()
 
+    # 更新模式状态显示
+    def update_mode_status(use_mock):
+        return f"🎭 当前模式: {'模拟数据模式' if use_mock else '真实数据模式'}"
+    
+    mock_data_checkbox.change(
+        fn=update_mode_status,
+        inputs=[mock_data_checkbox],
+        outputs=[mode_status]
+    )
 
     analyze_btn.click(
         fn=analyze_stock,
-        inputs=[stock_input],
+        inputs=[stock_input, mock_data_checkbox],  # 添加模拟数据选择作为输入
         outputs=[
             kline_display, 
             news_display, 

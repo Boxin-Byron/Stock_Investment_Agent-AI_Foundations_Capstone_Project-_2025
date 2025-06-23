@@ -30,11 +30,13 @@ services:
       - "127.0.0.1:7860:7860"
     environment:
       DIFY_HOST: "http://monitor:5001"
-      PYTHONUNBUFFERED: 1  # <-- 添加这一行来禁用输出缓冲
+      PYTHONUNBUFFERED: 1
       GRADIO_SERVER_NAME: "0.0.0.0"
     depends_on:
       monitor:
         condition: service_healthy
+    volumes:
+      - ./data:/app/data
     # 添加重启策略
     restart: unless-stopped
     volumes:
