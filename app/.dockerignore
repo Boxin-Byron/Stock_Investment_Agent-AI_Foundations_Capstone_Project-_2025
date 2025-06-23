@@ -5,3 +5,4 @@ __pycache__
 *.bat
 使用说明.txt
 temp/
+*.csv

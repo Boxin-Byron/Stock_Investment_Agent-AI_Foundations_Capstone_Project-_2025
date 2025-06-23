@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
+import csv
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
@@ -297,6 +298,40 @@ def generate_investment_recommendation(kline_data, sentiment_data, prediction):
     else:
         return "🚨 建议卖出 - 多项指标显示负面信号"
 
+def save_user_preference(preference, analysis_context):
+    """将用户的投资偏好和分析上下文保存到文件中"""
+    if not preference:
+        return "⚠️ 请先做出选择", gr.update(visible=True)
+
+    stock_code = analysis_context.get("stock_code", "N/A")
+    prediction_direction = analysis_context.get("prediction", {}).get("direction", "N/A")
+    
+    filename = "user_preferences.csv"
+    file_exists = os.path.exists(filename)
+    
+    try:
+        with open(filename, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            # 如果文件是新创建的，则写入表头
+            if not file_exists:
+                writer.writerow(['timestamp', 'stock_code', 'prediction_direction', 'user_preference'])
+            
+            # 写入数据
+            writer.writerow([
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                stock_code,
+                prediction_direction,
+                preference
+            ])
+        
+        print(f"✅ 用户偏好已保存: {stock_code} - {preference}")
+        # 返回成功信息，并隐藏反馈区域
+        return "✅ 感谢您的反馈！", gr.update(visible=False)
+    except Exception as e:
+        print(f"❌ 保存用户偏好失败: {e}")
+        return f"❌ 保存失败: {e}", gr.update(visible=True)
+
+
 def create_analysis_block(title, default_content):
     """创建分析区块"""
     with gr.Column(variant="panel", min_width=300) as block:
@@ -307,10 +342,12 @@ def create_analysis_block(title, default_content):
 def analyze_stock(stock_code):
     """主分析函数"""
     if not stock_code.strip():
-         return [  # 返回更多元素以匹配新的输出
+         return [
             {"error": "请输入股票代码"},
             {"error": "请输入股票代码"},
-            None, "", "", "", "", ""
+            None, "", "", "", "",
+            gr.update(visible=False),  # 隐藏反馈区域
+            {}  # 清空状态
         ]
     
     try:
@@ -325,17 +362,21 @@ def analyze_stock(stock_code):
         formatted_kline = format_kline_display(kline_data)
         formatted_sentiment = format_sentiment_display(sentiment_data)
         
-        # 生成简短的投资建议
         short_recommendation = generate_investment_recommendation(
             kline_data, sentiment_data, prediction
         )
         
-        # 从助手分析中获取详细建议
         detailed_recommendation = assistant_data.get(
             "detailed_recommendation", "未获取到详细分析"
         )
         
         print(f"✅ 分析完成: {stock_code}")
+        
+        # 准备要传递给反馈环节的上下文
+        analysis_context = {
+            "stock_code": stock_code,
+            "prediction": prediction
+        }
         
         return [
             formatted_kline,
@@ -344,15 +385,19 @@ def analyze_stock(stock_code):
             prediction["direction"],
             prediction["change_rate"],
             short_recommendation,
-            detailed_recommendation  # 添加详细建议输出
+            detailed_recommendation,
+            gr.update(visible=True),  # 显示反馈区域
+            analysis_context  # 更新状态
         ]
         
     except Exception as e:
         print(f"❌ 股票分析失败: {e}")
-        return [  # 返回更多元素以匹配新的输出
+        return [
             {"error": f"分析失败: {str(e)}"},
             {"error": f"分析失败: {str(e)}"},
-            None, "分析失败", "N/A", "系统错误，请重试", "详细分析获取失败"
+            None, "分析失败", "N/A", "系统错误，请重试", "详细分析获取失败",
+            gr.update(visible=False),  # 隐藏反馈区域
+            {}  # 清空状态
         ]
 
 # 界面布局
@@ -366,6 +411,8 @@ with gr.Blocks(
     """
 ) as app:
     
+    analysis_context_state = gr.State({})
+
     gr.Markdown("# 🚀 智能股票分析系统", elem_id="main-title")
     gr.Markdown("### 💡 支持股票代码或中文名称输入（如：600519 或 贵州茅台）")
     
@@ -425,12 +472,22 @@ with gr.Blocks(
                         detailed_recommendation = gr.Textbox(
                             show_label=False,
                             interactive=False,
-                            lines=5,  # 多行文本区域
+                            lines=5,
                             max_lines=10,
                             container=False
                         )
+            
+            with gr.Column(variant="panel", visible=False) as feedback_box:
+                gr.Markdown("### 🤔 您是否愿意根据此分析进行投资？")
+                preference_radio = gr.Radio(
+                    ["愿意", "中立", "不愿意"], 
+                    label="您的选择",
+                    container=False
+                )
+                submit_feedback_btn = gr.Button("提交反馈", variant="secondary")
+                feedback_status = gr.Markdown()
 
-    # 更新点击事件以匹配新的输出
+
     analyze_btn.click(
         fn=analyze_stock,
         inputs=[stock_input],
@@ -440,10 +497,19 @@ with gr.Blocks(
             chart_output,
             direction_output,
             change_rate_output,
-            short_recommendation,    # 简短建议
-            detailed_recommendation  # 详细建议
+            short_recommendation,
+            detailed_recommendation,
+            feedback_box,             # 控制反馈区域的可见性
+            analysis_context_state    # 更新状态
         ]
     )
+
+    submit_feedback_btn.click(
+        fn=save_user_preference,
+        inputs=[preference_radio, analysis_context_state],
+        outputs=[feedback_status, feedback_box] # 提交后更新状态文本并隐藏反馈区
+    )
+
 
 # 修改文件末尾的启动代码
 if __name__ == "__main__":

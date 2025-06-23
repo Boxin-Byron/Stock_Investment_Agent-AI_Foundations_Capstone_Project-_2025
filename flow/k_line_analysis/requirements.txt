@@ -1,6 +1,6 @@
 fastapi==0.115.13
 jqdatasdk==1.9.7
-numpy==2.3.1
+numpy==1.26.4
 pandas==2.3.0
 pydantic==2.11.7
 Requests==2.32.4

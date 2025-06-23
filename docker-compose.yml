@@ -1,5 +1,5 @@
 # version: '3.8'
-name: stock-investment-agent
+# name: stock-investment-agent
 
 services:
   monitor:
@@ -12,7 +12,7 @@ services:
       DIFY_HOST: "http://monitor:5001"
       DIFY_FLOW_API_KEY: "app-Pmqm52DKmWlzsTi07I3uQbSn"
       DEEPSEEK_API_KEY: "sk-653829eacd30417996f70834039c0414" 
-    PORT: 5001
+      PORT: 5001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 10s
