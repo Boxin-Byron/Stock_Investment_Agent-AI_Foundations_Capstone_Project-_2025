@@ -7,20 +7,13 @@ from fastapi import HTTPException
 from openai import OpenAI
 import unicodedata
 from fastapi.middleware.cors import CORSMiddleware
+import json
 
 
 # 从环境变量获取配置
-DIFY_BASE_URL = os.getenv("DIFY_BASE_URL", "https://api.dify.ai/v1")
-NEWS_FLOW_ID = os.getenv("DIFY_NEWS_FLOW_ID")
-NEWS_API_KEY = os.getenv("DIFY_NEWS_API_KEY")
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-
-STOCK_ASSISTANT_FLOW_ID = os.getenv('STOCK_ASSISTANT_FLOW_ID')
-
-# 构建工作流调用URL
-KLINE_FLOW_URL = "https://stock-investment-agent-ai-foundations.onrender.com/analyze"
-NEWS_FLOW_URL = f"{DIFY_BASE_URL}/workflows/run/{NEWS_FLOW_ID}"
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-653829eacd30417996f70834039c0414")
+DIFY_FLOW_API_KEY = os.getenv("DIFY_FLOW_API_KEY", "app-Pmqm52DKmWlzsTi07I3uQbSn")
 
 app = FastAPI()
 # 允许跨域
@@ -65,14 +58,26 @@ def contains_chinese(text):
     return False
 
 
-def call_kline_flow(stock_code):
+def call_dify_flow(stock_code):
     """调用K线分析微服务，返回latest_metrics字典"""
     try:
-        # 假设K线分析服务运行在本地8000端口
-        url = "http://localhost:8000/analyze"
-        payload = {"stock_code": stock_code}
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        headers = {
+            'Authorization': f'Bearer {DIFY_FLOW_API_KEY}',
+            'Content-Type': 'application/json',
+        }
+        json_data = {
+            'inputs': {
+                'stock_code': str(stock_code),
+            },
+            'query': '为我分析这支股票',
+            'response_mode': 'blocking',
+            'user': 'abc-123',
+        }
+        proxies = {
+            "http": "http://127.0.0.1:7890",
+            "https": "http://127.0.0.1:7890"
+        }
+        response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
         response.raise_for_status()
         # 返回格式为 {"latest_metrics": latest_metrics_string}
         return response.json()
@@ -83,49 +88,140 @@ def call_kline_flow(stock_code):
             "latest_metrics": '{"error": "K线分析服务不可用", "detail": "%s"}' % str(e)
         }
 
-def call_news_flow(stock_code):
-    """调用Dify中的新闻情绪分析工作流"""
-    try:
-        headers = {
-            "Authorization": f"Bearer {NEWS_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "input": stock_code,
-            "response_mode": "blocking"
-        }
-        
-        response = requests.post(NEWS_FLOW_URL, json=payload, headers=headers, timeout=15)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        # 错误处理：返回带有错误信息的模拟数据
-        print(f"新闻情绪分析API错误: {str(e)}")
-        return {
-            "sentiment_score": round(random.uniform(-0.5, 0.8), 2),
-            "key_events": [f"API错误: {str(e)}"]
-        }
+def calculate_comprehensive_score(metrics: dict, news_result: dict) -> float:
+    """计算综合评分"""
+    # 技术指标权重
+    tech_score = 0
+    tech_weight = 0
+    
+    # RSI影响
+    rsi = metrics.get('daily_technical_indicators', {}).get('rsi')
+    if rsi is not None:
+        rsi_weight = 0.3
+        # RSI在30-70之间最好，离50越远分数越低
+        rsi_dist = min(abs(rsi - 30), abs(rsi - 70))
+        rsi_score = max(0, 1 - rsi_dist / 20)  # 距离边界20点以内线性递减
+        tech_score += rsi_score * rsi_weight
+        tech_weight += rsi_weight
+    
+    # MACD影响
+    macd_diff = metrics.get('daily_technical_indicators', {}).get('macd_diff')
+    macd_dea = metrics.get('daily_technical_indicators', {}).get('macd_dea')
+    if macd_diff is not None and macd_dea is not None:
+        macd_weight = 0.25
+        macd_score = 1 if macd_diff > macd_dea else 0.5  # 金叉看涨
+        tech_score += macd_score * macd_weight
+        tech_weight += macd_weight
+    
+    # 价格变化率影响
+    price_change = metrics.get('price_change_pct', 0)
+    price_weight = 0.2
+    price_score = 0.5 + price_change * 0.1  # 每1%变化影响0.1分
+    tech_score += max(0, min(1, price_score)) * price_weight
+    tech_weight += price_weight
+    
+    # 布林带位置影响
+    close_price = metrics.get('close')
+    boll_upper = metrics.get('daily_technical_indicators', {}).get('boll_upper')
+    boll_lower = metrics.get('daily_technical_indicators', {}).get('boll_lower')
+    if close_price and boll_upper and boll_lower:
+        boll_weight = 0.25
+        boll_mid = (boll_upper + boll_lower) / 2
+        boll_score = 0.5 + (close_price - boll_mid) / (boll_upper - boll_mid) * 0.5
+        tech_score += max(0, min(1, boll_score)) * boll_weight
+        tech_weight += boll_weight
+    
+    # 新闻情绪影响
+    sentiment = news_result.get('sentiment_score', 0)
+    sentiment_weight = 0.5
+    sentiment_score = (sentiment + 1) / 2  # 从[-1,1]映射到[0,1]
+    
+    # 综合评分 (技术指标占70%，新闻情绪占30%)
+    if tech_weight > 0:
+        normalized_tech_score = tech_score / tech_weight
+        total_score = normalized_tech_score * 0.7 + sentiment_score * 0.3
+    else:
+        total_score = sentiment_score
+    
+    # 映射到5-9分范围
+    return round(5 + total_score * 4, 1)
 
-def call_dify_stock_assistant(stock_code: str):
-    """流式调用Dify股票分析助手Chatflow，返回生成器"""
-    try:
-        url = f"{DIFY_BASE_URL}/workflows/run/{STOCK_ASSISTANT_FLOW_ID}"
-        headers = {
-            "Authorization": f"Bearer {os.getSTOCK_ASSISTANT_FLOW_IDenv('STOCK_ASSISTANT_API_KEY')}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "input": {"stock_code": stock_code},
-            "response_mode": "streaming"
-        }
-        with requests.post(url, json=payload, headers=headers, stream=True, timeout=60) as response:
-            response.raise_for_status()
-            for chunk in response.iter_content(chunk_size=1024):
-                if chunk:
-                    yield chunk
-    except Exception as e:
-        yield f"流式API错误: {str(e)}".encode("utf-8")
+def generate_explanation(metrics: dict, news_result: dict) -> dict:
+    """生成解释文本和推荐"""
+    # 初始化解释部分
+    explanation = {
+        "kline_analysis": [],
+        "recommendation": None
+    }
+    
+    # 1. 添加技术指标解释
+    signals = metrics.get('technical_signals', {})
+    if signals:
+        explanation["kline_analysis"].append("📊 技术分析:")
+        if signals.get('rsi_signal'):
+            explanation["kline_analysis"].append(f"- RSI指标: {signals['rsi_signal']}")
+        if signals.get('macd_signal'):
+            explanation["kline_analysis"].append(f"- MACD指标: {signals['macd_signal']}")
+        if signals.get('boll_signal'):
+            explanation["kline_analysis"].append(f"- 布林带: {signals['boll_signal']}")
+    
+    # 2. 添加价格变动解释
+    price_change = metrics.get('price_change_pct')
+    if price_change is not None:
+        trend = "上涨" if price_change > 0 else "下跌"
+        explanation["kline_analysis"].append(f"📈 最新价格变动: {trend} {abs(price_change):.2f}%")
+    
+    # 3. 添加新闻情绪解释
+    sentiment = news_result.get('sentiment_score')
+    if sentiment is not None:
+        sentiment_label = "积极" if sentiment > 0.2 else "消极" if sentiment < -0.2 else "中性"
+        explanation["kline_analysis"].append(f"📰 新闻情绪: {sentiment_label} ({sentiment:.2f})")
+    
+    # 4. 生成推荐
+    score = calculate_comprehensive_score(metrics, news_result)
+    if score >= 8:
+        explanation["recommendation"] = "强烈推荐买入"
+    elif score >= 7:
+        explanation["recommendation"] = "推荐买入"
+    elif score >= 5:
+        explanation["recommendation"] = "谨慎持有"
+    else:
+        explanation["recommendation"] = "建议观望"
+    
+    return explanation
 
+def process_dify_flow_outputs(dify_flow_output):
+    input_string = dify_flow_output['answer']
+    string = input_string.replace("\n", "")
+    str_list = string.split("}{")
+    
+    # 确保我们有三个独立字典
+    str_list[0] += "}"
+    str_list[1] = "{" + str_list[1] + "}"
+    str_list[2] = "{" + str_list[2]
+    
+    new_list = []
+    for item in str_list:
+        try:
+            # 直接加载为JSON对象
+            parsed_item = json.loads(item)
+            
+            # 特别处理第一个字典(latest_metrics)
+            if 'latest_metrics' in parsed_item:
+                try:
+                    # 尝试解析latest_metrics字符串
+                    if isinstance(parsed_item['latest_metrics'], str):
+                        parsed_item['latest_metrics'] = json.loads(parsed_item['latest_metrics'])
+                except json.JSONDecodeError:
+                    # 如果无法解析，保持原始格式
+                    pass
+                
+            new_list.append(parsed_item)
+        except json.JSONDecodeError as e:
+            print(f"JSON解析错误: {e} | 原始内容: {item}")
+            # 如果无法解析为JSON，作为纯文本存入
+            new_list.append({"raw_content": item})
+    return new_list
 
 @app.get("/health")
 async def health_check():
@@ -142,18 +238,71 @@ def stock_eval(stock_code: str):
     print(f"📊 分析股票: {stock_code}")
     if contains_chinese(stock_code):
         stock_code = get_stock_code_with_deepseek(stock_code)
-    kline_result = call_kline_flow(stock_code)
-    news_result = call_news_flow(stock_code)
+
+    dify_flow_output = call_dify_flow(stock_code)
+    processed_data = process_dify_flow_outputs(dify_flow_output)
+    kline_result = processed_data[0]
+    news_result = processed_data[1]
+    assistant_result = processed_data[2]
+
+    # 处理技术指标数据
+    metrics = {}
+    if kline_result and 'latest_metrics' in kline_result:
+        if isinstance(kline_result['latest_metrics'], dict):
+            metrics = kline_result['latest_metrics']
+        elif isinstance(kline_result['latest_metrics'], str):
+            try:
+                metrics = json.loads(kline_result['latest_metrics'])
+            except:
+                metrics = {}
+    
+    # 获取情绪分析数据
+    sentiment_score = 0.0
+    key_events = []
+    if news_result:
+        sentiment_score = news_result.get('sentiment_score', 0.0)
+        key_events = news_result.get('key_events', [])
+
+    # 处理助手分析数据
+    assistant_analysis = ""
+    if assistant_result:
+        if '分析过程' in assistant_result and '最终投资建议' in assistant_result:
+            # 结构化返回助手分析的详细信息
+            assistant_analysis = {
+                "analysis_process": assistant_result.get('分析过程', ''),
+                "tech_summary": assistant_result.get('最终投资建议', {}).get('技术面总结', ''),
+                "news_summary": assistant_result.get('最终投资建议', {}).get('新闻情绪总结', ''),
+                "recommendation_details": assistant_result.get('最终投资建议', {}).get('综合判断与投资建议', {})
+            }
+        elif 'raw_content' in assistant_result:
+            # 对于无法解析的内容，返回原始文本
+            assistant_analysis = {"raw_analysis": assistant_result['raw_content']}
+        else:
+            assistant_analysis = {"error": "未获取到有效分析"}
+
+    # 计算综合评分
+    score = calculate_comprehensive_score(metrics, news_result) if news_result else 0.0
+    
+    # 生成解释文本
+    explanation = generate_explanation(metrics, news_result) if news_result else {
+        "kline_analysis": ["未获取到技术分析数据"],
+        "recommendation": "无法评估"
+    }
+    
+    
     assistant_result = b''.join(call_dify_stock_assistant(stock_code)).decode("utf-8")
 
     return {
-        "stock_code": stock_code,
-        "kline_analysis": kline_result.get("latest_metrics", "{}"),
-        "news_sentiment": {
-            "score": news_result.get("sentiment_score", 0.0),
-            "key_events": news_result.get("key_events", [])
-        },
-        "assistant_analysis": assistant_result
+        "industry_score": score,
+        "kline_summary": explanation.get("kline_analysis", []),
+        "sentiment_score": sentiment_score,
+        "key_events": key_events,
+        "recommendation": explanation.get("recommendation", "无法评估"),
+        "assistant_analysis": assistant_analysis,
+        # 返回原始数据便于调试
+        "raw_kline": kline_result,
+        "raw_news": news_result,
+        "raw_assistant": assistant_result
     }
 
 if __name__ == "__main__":

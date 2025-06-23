@@ -85,6 +85,28 @@ def call_stock_eval_api(stock_code):
         
         result = response.json()
         
+        # 获取详细分析数据
+        assistant_analysis = result.get("assistant_analysis", {})
+        
+        # 提取详细分析中的关键信息
+        detailed_recommendation = ""  # 初始化为空字符串
+        if isinstance(assistant_analysis, dict) and "recommendation_details" in assistant_analysis:
+            rec_details = assistant_analysis["recommendation_details"]
+            # 单独处理每一项内容
+            evidence = rec_details.get('支持该判断的主要逻辑证据', '无').replace('；', '\n  - ')
+            risks = rec_details.get('潜在风险提示', '无').replace('；', '\n  - ')
+            
+            # 构建详细建议字符串
+            detailed_recommendation = (
+                f"👉 当前建议: {rec_details.get('当前建议', '无')}\n"
+                f"📅 未来一周趋势: {rec_details.get('对未来一周的趋势方向及可能变动幅度估计', '无')}\n"
+                f"🔎 主要支持证据:\n  - {evidence}\n"
+                f"⚠️ 潜在风险:\n  - {risks}"
+            )
+        else:
+            # 其他情况处理
+            detailed_recommendation = json.dumps(assistant_analysis, indent=2, ensure_ascii=False)
+        
         return {
             "kline_data": {
                 "score": result.get("industry_score", 0),
@@ -94,6 +116,9 @@ def call_stock_eval_api(stock_code):
             "sentiment_data": {
                 "sentiment_score": result.get("sentiment_score", 0),
                 "key_events": result.get("key_events", [])
+            },
+            "assistant_data": {
+                "detailed_recommendation": detailed_recommendation
             }
         }
         
@@ -282,26 +307,32 @@ def create_analysis_block(title, default_content):
 def analyze_stock(stock_code):
     """主分析函数"""
     if not stock_code.strip():
-        return [
+         return [  # 返回更多元素以匹配新的输出
             {"error": "请输入股票代码"},
             {"error": "请输入股票代码"},
-            None, "", "", "请输入有效的股票代码"
+            None, "", "", "", "", ""
         ]
     
     try:
         print(f"🔍 开始分析股票: {stock_code}")
-        
         eval_result = call_stock_eval_api(stock_code)
+        
         kline_data = eval_result["kline_data"]
         sentiment_data = eval_result["sentiment_data"]
+        assistant_data = eval_result.get("assistant_data", {})
         
         prediction = generate_prediction_chart(stock_code)
-        
         formatted_kline = format_kline_display(kline_data)
         formatted_sentiment = format_sentiment_display(sentiment_data)
         
-        recommendation = generate_investment_recommendation(
+        # 生成简短的投资建议
+        short_recommendation = generate_investment_recommendation(
             kline_data, sentiment_data, prediction
+        )
+        
+        # 从助手分析中获取详细建议
+        detailed_recommendation = assistant_data.get(
+            "detailed_recommendation", "未获取到详细分析"
         )
         
         print(f"✅ 分析完成: {stock_code}")
@@ -312,15 +343,16 @@ def analyze_stock(stock_code):
             prediction["chart"],
             prediction["direction"],
             prediction["change_rate"],
-            recommendation
+            short_recommendation,
+            detailed_recommendation  # 添加详细建议输出
         ]
         
     except Exception as e:
         print(f"❌ 股票分析失败: {e}")
-        return [
+        return [  # 返回更多元素以匹配新的输出
             {"error": f"分析失败: {str(e)}"},
             {"error": f"分析失败: {str(e)}"},
-            None, "分析失败", "N/A", "系统错误，请重试"
+            None, "分析失败", "N/A", "系统错误，请重试", "详细分析获取失败"
         ]
 
 # 界面布局
@@ -376,15 +408,29 @@ with gr.Blocks(
                         elem_classes="gap-sm"
                     )
             
-            with gr.Column(variant="panel"):
-                gr.Markdown("### 💡 综合投资建议")
-                recommendation_output = gr.Textbox(
-                    show_label=False,
-                    interactive=False,
-                    scale=1,
-                    elem_classes="gap-sm"
-                )
+            # 修改投资建议区块为双建议面板
+            with gr.Row():
+                with gr.Column(scale=1):
+                    with gr.Column(variant="panel"):
+                        gr.Markdown("### 💡 AI投资建议")
+                        short_recommendation = gr.Textbox(
+                            show_label=False,
+                            interactive=False,
+                            container=False
+                        )
+                
+                with gr.Column(scale=1):
+                    with gr.Column(variant="panel"):
+                        gr.Markdown("### 📝 详细建议说明")
+                        detailed_recommendation = gr.Textbox(
+                            show_label=False,
+                            interactive=False,
+                            lines=5,  # 多行文本区域
+                            max_lines=10,
+                            container=False
+                        )
 
+    # 更新点击事件以匹配新的输出
     analyze_btn.click(
         fn=analyze_stock,
         inputs=[stock_input],
@@ -394,7 +440,8 @@ with gr.Blocks(
             chart_output,
             direction_output,
             change_rate_output,
-            recommendation_output
+            short_recommendation,    # 简短建议
+            detailed_recommendation  # 详细建议
         ]
     )
 
@@ -414,8 +461,10 @@ if __name__ == "__main__":
     print(f"🔗 DIFY_HOST: {DIFY_HOST}")
     print(f"🌐 服务将在 http://0.0.0.0:7860 启动")
     
+    # 强制设置为可外部访问的配置
     app.launch(
-        server_port=7860, 
+        server_name="0.0.0.0",   # 允许所有网络接口访问
+        server_port=7860,        # 固定端口
         share=False,
-        server_name="0.0.0.0"  # 关键修改，允许外部访问
+        debug=True               # 显示详细错误
     )
