@@ -83,9 +83,23 @@ def call_dify_flow(stock_code):
         return response.json()
     except Exception as e:
         print(f"K线分析服务调用错误: {str(e)}")
-        # 返回模拟数据结构
+        # 建议添加重试逻辑
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(..., timeout=30+attempt*10)
+                response.raise_for_status()
+                return response.json()
+            except:
+                time.sleep(2 ** attempt)
+        # 添加回退数据结构
         return {
-            "latest_metrics": '{"error": "K线分析服务不可用", "detail": "%s"}' % str(e)
+            "latest_metrics": {"error": "服务不可用"},
+            "answer": json.dumps([
+                {'latest_metrics': {'error': '服务不可用'}},
+                {'data': {'outputs': {'text': json.dumps({'error': '新闻分析失败'})}}},
+                {'error': '分析服务不可用'}
+            ])
         }
 
 def calculate_comprehensive_score(metrics: dict, news_result: dict) -> float:
@@ -191,38 +205,54 @@ def generate_explanation(metrics: dict, news_result: dict) -> dict:
     return explanation
 
 def process_dify_flow_outputs(dify_flow_output):
-    input_string = dify_flow_output['answer']
-    string = input_string.replace("\n", "")
-    str_list = string.split("}{")
-    
-    # 确保我们有三个独立字典
-    str_list[0] += "}"
-    str_list[1] = "{" + str_list[1] + "}"
-    str_list[2] = "{" + str_list[2]
-    
-    new_list = []
-    for item in str_list:
-        try:
-            # 直接加载为JSON对象
-            parsed_item = json.loads(item)
-            
-            # 特别处理第一个字典(latest_metrics)
-            if 'latest_metrics' in parsed_item:
-                try:
-                    # 尝试解析latest_metrics字符串
-                    if isinstance(parsed_item['latest_metrics'], str):
-                        parsed_item['latest_metrics'] = json.loads(parsed_item['latest_metrics'])
-                except json.JSONDecodeError:
-                    # 如果无法解析，保持原始格式
-                    pass
+    try:
+        input_string = dify_flow_output['answer']
+        string = input_string.replace("\n", "")
+        str_list = string.split("}{")
+        
+        # 确保我们有三个独立字典
+        str_list[0] += "}"
+        str_list[1] = "{" + str_list[1] + "}"
+        str_list[2] = "{" + str_list[2]
+        
+        new_list = []
+        for item in str_list:
+            try:
+                # 直接加载为JSON对象
+                parsed_item = json.loads(item)
                 
-            new_list.append(parsed_item)
-        except json.JSONDecodeError as e:
-            print(f"JSON解析错误: {e} | 原始内容: {item}")
-            # 如果无法解析为JSON，作为纯文本存入
-            new_list.append({"raw_content": item})
-    return new_list
-
+                # 特别处理第一个字典(latest_metrics)
+                if 'latest_metrics' in parsed_item:
+                    try:
+                        # 尝试解析latest_metrics字符串
+                        if isinstance(parsed_item['latest_metrics'], str):
+                            parsed_item['latest_metrics'] = json.loads(parsed_item['latest_metrics'])
+                    except json.JSONDecodeError:
+                        # 如果无法解析，保持原始格式
+                        pass
+                    
+                new_list.append(parsed_item)
+            except json.JSONDecodeError as e:
+                print(f"JSON解析错误: {e} | 原始内容: {item}")
+                # 如果无法解析为JSON，作为纯文本存入
+                new_list.append({"raw_content": item})
+        return new_list
+    except:
+        print(f"处理输出失败: {e}")
+        # 添加备用解析方案
+        try:
+            if "latest_metrics" in input_string:
+                start = input_string.find("{", input_string.find("latest_metrics"))
+                end = input_string.find("}", start) + 1
+                metrics = json.loads(input_string[start:end])
+                # ...类似处理其他部分
+            return [metrics, news, analysis] if all else []
+        except:
+            return [
+                {"raw_content": input_string[:100] + "..."},
+                {"error": "解析失败"},
+                {"error": "分析失败"}
+            ]
 @app.get("/health")
 async def health_check():
     print(f"🏥 健康检查: {datetime.datetime.now().isoformat()}")
@@ -235,75 +265,95 @@ async def health_check():
 
 @app.post("/api/stock_eval")
 def stock_eval(stock_code: str):
-    print(f"📊 分析股票: {stock_code}")
-    if contains_chinese(stock_code):
-        stock_code = get_stock_code_with_deepseek(stock_code)
+    try:
+        print(f"📊 分析股票: {stock_code}")
+        if contains_chinese(stock_code):
+            stock_code = get_stock_code_with_deepseek(stock_code)
 
-    dify_flow_output = call_dify_flow(stock_code)
-    processed_data = process_dify_flow_outputs(dify_flow_output)
-    kline_result = processed_data[0]
-    news_result = processed_data[1]
-    assistant_result = processed_data[2]
+        dify_flow_output = call_dify_flow(stock_code)
+        processed_data = process_dify_flow_outputs(dify_flow_output)
+        kline_result = processed_data[0]
+        news_result = processed_data[1]
+        text = news_result['data']['outputs']['text'].replace('```json', '').replace('```', '').strip()
+        text = re.sub(r'\n\s*', '', text)  # 去除换行和多余空格
+        news_result = json.loads(text) # 输出 key_events 列表
+        assistant_result = processed_data[2]
 
-    # 处理技术指标数据
-    metrics = {}
-    if kline_result and 'latest_metrics' in kline_result:
-        if isinstance(kline_result['latest_metrics'], dict):
-            metrics = kline_result['latest_metrics']
-        elif isinstance(kline_result['latest_metrics'], str):
-            try:
-                metrics = json.loads(kline_result['latest_metrics'])
-            except:
-                metrics = {}
-    
-    # 获取情绪分析数据
-    sentiment_score = 0.0
-    key_events = []
-    if news_result:
-        sentiment_score = news_result.get('sentiment_score', 0.0)
-        key_events = news_result.get('key_events', [])
+        # 处理技术指标数据
+        metrics = {}
+        if kline_result and 'latest_metrics' in kline_result:
+            if isinstance(kline_result['latest_metrics'], dict):
+                metrics = kline_result['latest_metrics']
+            elif isinstance(kline_result['latest_metrics'], str):
+                try:
+                    metrics = json.loads(kline_result['latest_metrics'])
+                except:
+                    metrics = {}
+        
+        # 获取情绪分析数据
+        sentiment_score = 0.0
+        key_events = []
+        if news_result:
+            sentiment_score = news_result.get('sentiment_score', 0.0)
+            key_events = news_result.get('key_events', [])
 
-    # 处理助手分析数据
-    assistant_analysis = ""
-    if assistant_result:
-        if '分析过程' in assistant_result and '最终投资建议' in assistant_result:
-            # 结构化返回助手分析的详细信息
-            assistant_analysis = {
-                "analysis_process": assistant_result.get('分析过程', ''),
-                "tech_summary": assistant_result.get('最终投资建议', {}).get('技术面总结', ''),
-                "news_summary": assistant_result.get('最终投资建议', {}).get('新闻情绪总结', ''),
-                "recommendation_details": assistant_result.get('最终投资建议', {}).get('综合判断与投资建议', {})
-            }
-        elif 'raw_content' in assistant_result:
-            # 对于无法解析的内容，返回原始文本
-            assistant_analysis = {"raw_analysis": assistant_result['raw_content']}
-        else:
-            assistant_analysis = {"error": "未获取到有效分析"}
+        # 处理助手分析数据
+        assistant_analysis = ""
+        if assistant_result:
+            if '分析过程' in assistant_result and '最终投资建议' in assistant_result:
+                # 结构化返回助手分析的详细信息
+                assistant_analysis = {
+                    "analysis_process": assistant_result.get('分析过程', ''),
+                    "tech_summary": assistant_result.get('最终投资建议', {}).get('技术面总结', ''),
+                    "news_summary": assistant_result.get('最终投资建议', {}).get('新闻情绪总结', ''),
+                    "recommendation_details": assistant_result.get('最终投资建议', {}).get('综合判断与投资建议', {})
+                }
+            elif 'raw_content' in assistant_result:
+                # 对于无法解析的内容，返回原始文本
+                assistant_analysis = {"raw_analysis": assistant_result['raw_content']}
+            else:
+                assistant_analysis = {"error": "未获取到有效分析"}
 
-    # 计算综合评分
-    score = calculate_comprehensive_score(metrics, news_result) if news_result else 0.0
-    
-    # 生成解释文本
-    explanation = generate_explanation(metrics, news_result) if news_result else {
-        "kline_analysis": ["未获取到技术分析数据"],
-        "recommendation": "无法评估"
-    }
-    
-    
-    assistant_result = b''.join(call_dify_stock_assistant(stock_code)).decode("utf-8")
+        # 计算综合评分
+        score = calculate_comprehensive_score(metrics, news_result) if news_result else 0.0
+        
+        # 生成解释文本
+        explanation = generate_explanation(metrics, news_result) if news_result else {
+            "kline_analysis": ["未获取到技术分析数据"],
+            "recommendation": "无法评估"
+        }
+        
+        
+        assistant_result = b''.join(call_dify_stock_assistant(stock_code)).decode("utf-8")
 
-    return {
-        "industry_score": score,
-        "kline_summary": explanation.get("kline_analysis", []),
-        "sentiment_score": sentiment_score,
-        "key_events": key_events,
-        "recommendation": explanation.get("recommendation", "无法评估"),
-        "assistant_analysis": assistant_analysis,
-        # 返回原始数据便于调试
-        "raw_kline": kline_result,
-        "raw_news": news_result,
-        "raw_assistant": assistant_result
-    }
+        return {
+            "industry_score": score,
+            "kline_summary": explanation.get("kline_analysis", []),
+            "sentiment_score": sentiment_score,
+            "key_events": key_events,
+            "recommendation": explanation.get("recommendation", "无法评估"),
+            "assistant_analysis": assistant_analysis,
+            # 返回原始数据便于调试
+            "raw_kline": kline_result,
+            "raw_news": news_result,
+            "raw_assistant": assistant_result
+        }
+    except Exception as e:
+        print(f"股票分析失败: {str(e)}")
+        timestamp = datetime.now().isoformat()
+        return {
+            "industry_score": 0.0,
+            "kline_summary": [f"分析失败: {str(e)[:100]}"],
+            "sentiment_score": 0.0,
+            "key_events": [],
+            "recommendation": "无法评估",
+            "assistant_analysis": {
+                "error": str(e),
+                "timestamp": timestamp
+            },
+            "raw_data": {"error_info": str(e)}
+        }
+
 
 if __name__ == "__main__":
     import uvicorn

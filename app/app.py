@@ -68,6 +68,11 @@ DIFY_HOST = os.getenv("DIFY_HOST", "http://monitor:5001")
 # 添加模拟模式开关
 USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
 
+# 增强路径处理 - 使用当前目录下的data文件夹
+DATA_DIR = os.path.join(os.getcwd(), "user_data")
+os.makedirs(DATA_DIR, exist_ok=True)
+print(f"📂 用户数据将保存至: {DATA_DIR}")
+
 def call_stock_eval_api(stock_code):
     """调用后端股票评估API"""
     try:
@@ -309,26 +314,39 @@ def get_attention_level(sentiment_score, key_events):
         return "😴 关注较少"
 
 def generate_prediction_chart(stock_code):
-    """生成价格预测图表"""
-    base_price = random.randint(30, 100)
-    dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
-    prices = [round(base_price * (1 + 0.02*i) + random.uniform(-1,1), 2) for i in range(7)]
-    
-    df = pd.DataFrame({"日期": dates, "价格": prices})
-    
-    fig, ax = plt.subplots(figsize=(8,5))
-    df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o")
-    ax.set_title("未来一周价格预测", fontsize=14)
-    ax.set_xlabel("日期", fontsize=12)
-    ax.set_ylabel("价格 (元)", fontsize=12)
-    ax.grid(True, linestyle="--", alpha=0.7)
-    plt.tight_layout()
-    
-    return {
-        "direction": "看涨 ▲" if prices[-1] > prices[0] else "看跌 ▼",
-        "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
-        "chart": fig
-    }
+    try:
+        """生成价格预测图表"""
+        base_price = random.randint(30, 100)
+        dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
+        prices = [round(base_price * (1 + 0.02*i) + random.uniform(-1,1), 2) for i in range(7)]
+        
+        df = pd.DataFrame({"日期": dates, "价格": prices})
+        
+        fig, ax = plt.subplots(figsize=(8,5))
+        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o")
+        ax.set_title("未来一周价格预测", fontsize=14)
+        ax.set_xlabel("日期", fontsize=12)
+        ax.set_ylabel("价格 (元)", fontsize=12)
+        ax.grid(True, linestyle="--", alpha=0.7)
+        plt.tight_layout()
+        
+        return {
+            "direction": "看涨 ▲" if prices[-1] > prices[0] else "看跌 ▼",
+            "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
+            "chart": fig
+        }
+    except:
+        print(f"生成图表失败: {e}")
+        # 创建错误图表
+        fig, ax = plt.subplots(figsize=(8,5))
+        ax.text(0.5, 0.5, "图表生成失败\n请检查数据", 
+                ha="center", va="center", fontsize=14)
+        ax.set_title("图表错误", color="red")
+        return {
+            "direction": "错误",
+            "change_rate": "N/A",
+            "chart": fig
+        }
 
 def generate_investment_recommendation(kline_data, sentiment_data, prediction):
     """生成综合投资建议"""
@@ -362,35 +380,46 @@ def save_user_preference(preference, analysis_context):
     stock_code = analysis_context.get("stock_code", "N/A")
     prediction_direction = analysis_context.get("prediction", {}).get("direction", "N/A")
     
-    # 使用挂载的数据目录
-    data_dir = "/app/data"
-    os.makedirs(data_dir, exist_ok=True)  # 确保目录存在
-    filename = os.path.join(data_dir, "user_preferences.csv")
+    # 添加时间戳确保唯一性
+    timestamp = datetime.now().strftime('%Y-%m-%d')
+    filename = f"user_preferences_{timestamp}.csv"
+    filepath = os.path.join(DATA_DIR, filename)
     
-    file_exists = os.path.exists(filename)
-    
+    # 写入CSV文件
     try:
-        with open(filename, 'a', newline='', encoding='utf-8') as f:
+        file_exists = os.path.exists(filepath)
+        with open(filepath, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            # 如果文件是新创建的，则写入表头
             if not file_exists:
-                writer.writerow(['timestamp', 'stock_code', 'prediction_direction', 'user_preference'])
+                writer.writerow(['时间', '股票代码', '预测趋势', '用户偏好'])
             
-            # 写入数据
             writer.writerow([
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                datetime.now().strftime('%H:%M:%S'),
                 stock_code,
                 prediction_direction,
                 preference
             ])
         
-        print(f"✅ 用户偏好已保存: {stock_code} - {preference}")
-        print(f"📁 保存路径: {filename}")
-        # 返回成功信息，并隐藏反馈区域
-        return "✅ 感谢您的反馈！", gr.update(visible=False)
+        print(f"✅ 用户偏好已保存至: {filepath}")
+        message = f"✅ 感谢反馈！数据保存于: {filepath}\n您可以点击下方'浏览用户数据'查看"
+        return message, gr.update(visible=False)
     except Exception as e:
         print(f"❌ 保存用户偏好失败: {e}")
         return f"❌ 保存失败: {e}", gr.update(visible=True)
+
+def get_saved_user_prefs():
+    """获取所有保存的用户偏好文件"""
+    try:
+        # 获取目录下所有CSV文件
+        files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
+        
+        # 按修改时间排序（最新在前）
+        files.sort(key=lambda x: os.path.getmtime(os.path.join(DATA_DIR, x)), reverse=True)
+        
+        return files
+    except Exception as e:
+        print(f"❌ 获取用户偏好文件列表失败: {e}")
+        return []
 
 def create_analysis_block(title, default_content):
     """创建分析区块"""
@@ -638,8 +667,38 @@ with gr.Blocks(
     )
 
 
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "time": datetime.now().isoformat(),
+        "version": "1.0.2"
+    }
+
+# 在应用启动时
+def check_resources():
+    problems = []
+    # 检查数据目录权限
+    if not os.access(DATA_DIR, os.W_OK):
+        problems.append(f"目录不可写: {DATA_DIR}")
+    
+    # 检查字体可用性
+    try:
+        plt.figure()
+        plt.text(0.5, 0.5, "字体测试", fontsize=12)
+        plt.close()
+    except Exception as e:
+        problems.append(f"字体错误: {str(e)}")
+    
+    return problems
+
 # 修改文件末尾的启动代码
 if __name__ == "__main__":
+    issues = check_resources()
+    if issues:
+        print("❌ 启动前检查失败:")
+        for issue in issues:
+            print(f"  - {issue}")
     # Windows 专用处理
     if sys.platform == 'win32':
         print("🛠️ Windows 系统检测 - 启用专用设置")
@@ -654,6 +713,16 @@ if __name__ == "__main__":
     print(f"🔗 DIFY_HOST: {DIFY_HOST}")
     print(f"🌐 服务将在 http://0.0.0.0:7860 启动")
     
+    # 创建初始偏好文件示例（如果目录为空）
+    if not os.listdir(DATA_DIR):
+        sample_file = os.path.join(DATA_DIR, "user_preferences_samples.csv")
+        with open(sample_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['时间', '股票代码', '预测趋势', '用户偏好'])
+            writer.writerow(['09:30:45', '600519', '看涨 ▲', '愿意'])
+            writer.writerow(['10:15:22', '000001', '中性 →', '中立'])
+        print(f"📝 创建示例文件: {sample_file}")
+
     # 强制设置为可外部访问的配置
     app.launch(
         server_name="0.0.0.0",   # 允许所有网络接口访问

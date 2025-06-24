@@ -19,7 +19,7 @@ proxies = {
 }
 response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
 print(response.status_code)
-print(response.json())
+print(response.text)
 
 
 import json

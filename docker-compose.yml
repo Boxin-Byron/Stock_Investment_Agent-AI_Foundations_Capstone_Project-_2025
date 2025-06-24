@@ -7,58 +7,48 @@ services:
       context: ./monitor
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:5001:5001"
+      # - "127.0.0.1:5001:5001"
+      - "5001:5001"  # 允许外部访问
     environment:
-      DIFY_HOST: "http://monitor:5001"
       DIFY_FLOW_API_KEY: "app-Pmqm52DKmWlzsTi07I3uQbSn"
       DEEPSEEK_API_KEY: "sk-653829eacd30417996f70834039c0414" 
       PORT: 5001
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]  # 使用代码中的健康检查端点
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     # 添加重启策略
     restart: unless-stopped
+    networks:
+      - stock-network  # 显式加入网络
 
   app:
     build:
       context: ./app
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:7860:7860"
+      # - "127.0.0.1:7860:7860"
+      - "7860:7860"  # 允许外部访问
     environment:
-      DIFY_HOST: "http://monitor:5001"
+      DIFY_HOST: "http://monitor:5001"  # 使用内部DNS访问监控服务
+      USE_MOCK_DATA: "false"  # 添加模拟模式开关
       PYTHONUNBUFFERED: 1
       GRADIO_SERVER_NAME: "0.0.0.0"
     depends_on:
       monitor:
-        condition: service_healthy
+        condition: service_healthy  # 依赖健康状态
     volumes:
-      - ./data:/app/data
+      - ./app/user_data:/app/user_data  # 持久化用户数据
+      - ./app/config:/app/config
+    networks:
+      - stock-network  # 显式加入网络
     # 添加重启策略
     restart: unless-stopped
-    volumes:
-      - type: bind
-        source: ./app/data
-        target: /app/data
-      - type: bind
-        source: ./app/config
-        target: /app/config
-
-  k_line_analysis:
-    build:
-      context: ./flow/k_line_analysis
-      dockerfile: Dockerfile
-    ports:
-      - "127.0.0.1:8000:8000"
-    restart: unless-stopped
-    volumes:
-      - type: bind
-        source: ./flow/k_line_analysis/temp
-        target: /app/temp
 
 networks:
   default:
     name: stock-network
+  stock-network:  # 明确定义网络
+    driver: bridge
