@@ -13,6 +13,9 @@ services:
       DIFY_FLOW_API_KEY: "app-Pmqm52DKmWlzsTi07I3uQbSn"
       DEEPSEEK_API_KEY: "sk-653829eacd30417996f70834039c0414" 
       PORT: 5001
+      # 设置 FastAPI 和 Uvicorn 日志级别
+      LOG_LEVEL: "DEBUG"
+      UVICORN_LOG_LEVEL: "debug"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]  # 使用代码中的健康检查端点
       interval: 10s
@@ -32,7 +35,7 @@ services:
       # - "127.0.0.1:7860:7860"
       - "7860:7860"  # 允许外部访问
     environment:
-      DIFY_HOST: "http://localhost:5001"  # 使用内部DNS访问监控服务
+      DIFY_HOST: "http://monitor:5001"  # 使用内部DNS访问监控服务
       USE_MOCK_DATA: "false"  # 添加模拟模式开关
       PYTHONUNBUFFERED: 1
       GRADIO_SERVER_NAME: "0.0.0.0"
@@ -48,7 +51,7 @@ services:
     restart: unless-stopped
 
 networks:
-  default:
-    name: stock-network
-  stock-network:  # 明确定义网络
+  stock-network:
     driver: bridge
+  # stock-network:  # 明确定义网络
+  #   driver: bridge

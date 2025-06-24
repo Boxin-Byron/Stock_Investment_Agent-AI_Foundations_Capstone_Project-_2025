@@ -3,12 +3,13 @@ import random
 import datetime
 from fastapi import FastAPI
 import requests
-from fastapi import HTTPException
+from fastapi import HTTPException,Request
 from openai import OpenAI
 import unicodedata
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import time
+import re
 
 # 从环境变量获取配置
 
@@ -72,23 +73,27 @@ def call_dify_flow(stock_code):
         'response_mode': 'blocking',
         'user': 'abc-123',
     }
-    proxies = {
-        "http": "http://127.0.0.1:7890",
-        "https": "http://127.0.0.1:7890"
-    }
+    # proxies = {
+    #     "http": "http://127.0.0.1:7890",
+    #     "https": "http://127.0.0.1:7890"
+    # }
     try:
-       
-        response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
+        print(f"🌐 请求URL: https://api.dify.ai/v1/chat-messages")
+        print(f"📝 请求头: {headers}")
+        print(f"📦 请求体: {json_data}")
+    #    response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
+        response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data)
         response.raise_for_status()
         # 返回格式为 {"latest_metrics": latest_metrics_string}
         return response.json()
     except Exception as e:
-        print(f"K线分析服务调用错误: {str(e)}")
+        print(f"❌ 请求失败: {str(e)}")
         # 建议添加重试逻辑
         max_retries = 2
         for attempt in range(max_retries):
             try:
-                response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
+                # response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
+                response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data)
                 response.raise_for_status()
                 return response.json()
             except:
@@ -102,6 +107,8 @@ def call_dify_flow(stock_code):
                 {'error': '分析服务不可用'}
             ])
         }
+    
+
 
 def calculate_comprehensive_score(metrics: dict, news_result: dict) -> float:
     """计算综合评分"""
@@ -263,9 +270,35 @@ async def health_check():
         "timestamp": datetime.datetime.now().isoformat()
     }
 
+@app.get("/api/network_test")
+def network_test():
+    """测试网络连接状况"""
+    test_urls = [
+        "https://api.dify.ai", 
+        "https://www.baidu.com",
+        "https://www.google.com"
+    ]
+    
+    results = {}
+    for url in test_urls:
+        try:
+            start = time.time()
+            response = requests.head(url, timeout=5)
+            latency = round((time.time() - start) * 1000, 2)
+            results[url] = {
+                "status_code": response.status_code,
+                "latency_ms": latency
+            }
+        except Exception as e:
+            results[url] = {"error": str(e)}
+    
+    return results
+
 
 @app.post("/api/stock_eval")
-def stock_eval(stock_code: str):
+def stock_eval(stock_code: str,request: Request):
+    # client_host = request.client.host if request.client else "unknown"
+    # print(f"📥 收到请求 from {client_host}: {request.url}")
     try:
         print(f"📊 分析股票: {stock_code}")
         if contains_chinese(stock_code):
@@ -279,7 +312,9 @@ def stock_eval(stock_code: str):
         text = re.sub(r'\n\s*', '', text)  # 去除换行和多余空格
         news_result = json.loads(text) # 输出 key_events 列表
         assistant_result = processed_data[2]
-
+        print(f"📈 K线分析结果: {kline_result}")
+        print(f"📰 新闻分析结果: {news_result}")
+        print(f"🤖 助手分析结果: {assistant_result}")
         # 处理技术指标数据
         metrics = {}
         if kline_result and 'latest_metrics' in kline_result:
@@ -291,13 +326,15 @@ def stock_eval(stock_code: str):
                 except:
                     metrics = {}
         
+        print(f"📈 技术指标: {metrics}")
         # 获取情绪分析数据
         sentiment_score = 0.0
         key_events = []
         if news_result:
             sentiment_score = news_result.get('sentiment_score', 0.0)
             key_events = news_result.get('key_events', [])
-
+        
+        print(f"📰 新闻情绪: {sentiment_score}, 关键事件: {key_events}")
         # 处理助手分析数据
         assistant_analysis = ""
         if assistant_result:
@@ -315,18 +352,16 @@ def stock_eval(stock_code: str):
             else:
                 assistant_analysis = {"error": "未获取到有效分析"}
 
+        print(f"🤖 助手分析: {assistant_analysis}")
         # 计算综合评分
         score = calculate_comprehensive_score(metrics, news_result) if news_result else 0.0
-        
+        print(f"🔢 综合评分: {score}")
         # 生成解释文本
         explanation = generate_explanation(metrics, news_result) if news_result else {
             "kline_analysis": ["未获取到技术分析数据"],
             "recommendation": "无法评估"
         }
-        
-        
-        assistant_result = b''.join(call_dify_stock_assistant(stock_code)).decode("utf-8")
-
+        print(f"📜 解释文本: {explanation}")
         return {
             "industry_score": score,
             "kline_summary": explanation.get("kline_analysis", []),

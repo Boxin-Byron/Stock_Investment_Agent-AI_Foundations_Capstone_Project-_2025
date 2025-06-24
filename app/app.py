@@ -80,13 +80,13 @@ def call_stock_eval_api(stock_code):
         
        # 创建完整的API URL
         url = f"{DIFY_HOST}/api/stock_eval"
-        
+        print(f"🔗 调用API: {url}")
         # 修改：将数据作为 URL 查询参数发送，而不是 JSON 请求体
-        params = {"stock_code": stock_code}
+        params = {"stock_code": str(stock_code)}
         
         # 发送请求（POST），使用 params 参数
         # 增加超时时间以应对可能的慢响应
-        response = requests.post(url, params=params, timeout=30)
+        response = requests.post(url, params=params)
         
         response.raise_for_status()  # 如果状态码不是2xx，将引发HTTPError
         
@@ -130,7 +130,7 @@ def call_stock_eval_api(stock_code):
         }
         
     except requests.exceptions.ConnectionError as e:
-        print(f"❌ 连接失败：无法连接到后端服务 at {DIFY_HOST}")
+        print(f"❌ 连接失败：无法连接到后端服务 at {DIFY_HOST} - {e}")
         # 抛出自定义异常，以便在UI上显示更友好的信息
         raise ConnectionError(f"无法连接到后端分析服务({DIFY_HOST})，请检查后端服务是否正常运行。") from e
     except requests.exceptions.HTTPError as e:
