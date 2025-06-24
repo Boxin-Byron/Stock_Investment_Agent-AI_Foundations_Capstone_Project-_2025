@@ -44,4 +44,7 @@ COPY . .
 
 EXPOSE 7860
 
+
+# 禁用缓冲以提高日志实时性
+ENV PYTHONUNBUFFERED=1
 CMD ["python", "app.py"]

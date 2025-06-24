@@ -17,7 +17,9 @@ proxies = {
     "http": "http://127.0.0.1:7890",
     "https": "http://127.0.0.1:7890"
 }
-response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
+# url = 'https://api.dify.ai/v1/chat-messages'
+url = 'http://localhost:5001/api/stock_eval'
+response = requests.post(url, headers=headers, json=json_data,proxies=proxies)
 print(response.status_code)
 print(response.text)
 

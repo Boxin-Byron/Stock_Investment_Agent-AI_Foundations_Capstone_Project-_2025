@@ -667,13 +667,6 @@ with gr.Blocks(
     )
 
 
-@app.get("/health")
-def health_check():
-    return {
-        "status": "ok",
-        "time": datetime.now().isoformat(),
-        "version": "1.0.2"
-    }
 
 # 在应用启动时
 def check_resources():

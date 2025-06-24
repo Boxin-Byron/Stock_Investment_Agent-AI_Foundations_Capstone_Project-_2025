@@ -8,7 +8,7 @@ from openai import OpenAI
 import unicodedata
 from fastapi.middleware.cors import CORSMiddleware
 import json
-
+import time
 
 # 从环境变量获取配置
 
@@ -60,23 +60,24 @@ def contains_chinese(text):
 
 def call_dify_flow(stock_code):
     """调用K线分析微服务，返回latest_metrics字典"""
+    headers = {
+        'Authorization': f'Bearer {DIFY_FLOW_API_KEY}',
+        'Content-Type': 'application/json',
+    }
+    json_data = {
+        'inputs': {
+            'stock_code': str(stock_code),
+        },
+        'query': '为我分析这支股票',
+        'response_mode': 'blocking',
+        'user': 'abc-123',
+    }
+    proxies = {
+        "http": "http://127.0.0.1:7890",
+        "https": "http://127.0.0.1:7890"
+    }
     try:
-        headers = {
-            'Authorization': f'Bearer {DIFY_FLOW_API_KEY}',
-            'Content-Type': 'application/json',
-        }
-        json_data = {
-            'inputs': {
-                'stock_code': str(stock_code),
-            },
-            'query': '为我分析这支股票',
-            'response_mode': 'blocking',
-            'user': 'abc-123',
-        }
-        proxies = {
-            "http": "http://127.0.0.1:7890",
-            "https": "http://127.0.0.1:7890"
-        }
+       
         response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
         response.raise_for_status()
         # 返回格式为 {"latest_metrics": latest_metrics_string}
@@ -87,7 +88,7 @@ def call_dify_flow(stock_code):
         max_retries = 2
         for attempt in range(max_retries):
             try:
-                response = requests.post(..., timeout=30+attempt*10)
+                response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
                 response.raise_for_status()
                 return response.json()
             except:
@@ -340,7 +341,7 @@ def stock_eval(stock_code: str):
         }
     except Exception as e:
         print(f"股票分析失败: {str(e)}")
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.datetime.now().isoformat()
         return {
             "industry_score": 0.0,
             "kline_summary": [f"分析失败: {str(e)[:100]}"],

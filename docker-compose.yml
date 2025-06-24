@@ -32,7 +32,7 @@ services:
       # - "127.0.0.1:7860:7860"
       - "7860:7860"  # 允许外部访问
     environment:
-      DIFY_HOST: "http://monitor:5001"  # 使用内部DNS访问监控服务
+      DIFY_HOST: "http://localhost:5001"  # 使用内部DNS访问监控服务
       USE_MOCK_DATA: "false"  # 添加模拟模式开关
       PYTHONUNBUFFERED: 1
       GRADIO_SERVER_NAME: "0.0.0.0"
