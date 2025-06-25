@@ -8,6 +8,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 import csv
+import re # 新增
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
@@ -97,8 +98,10 @@ def call_stock_eval_api(stock_code):
         
         # 提取详细分析中的关键信息
         detailed_recommendation = ""  # 初始化为空字符串
+        prediction_text = "趋势未知" # 新增：初始化预测文本
         if isinstance(assistant_analysis, dict) and "recommendation_details" in assistant_analysis:
             rec_details = assistant_analysis["recommendation_details"]
+            prediction_text = rec_details.get('对未来一周的趋势方向及可能变动幅度估计', '趋势未知') # 新增：获取预测文本
             # 单独处理每一项内容
             evidence = rec_details.get('支持该判断的主要逻辑证据', '无').replace('；', '\n  - ')
             risks = rec_details.get('潜在风险提示', '无').replace('；', '\n  - ')
@@ -125,7 +128,8 @@ def call_stock_eval_api(stock_code):
                 "key_events": result.get("key_events", [])
             },
             "assistant_data": {
-                "detailed_recommendation": detailed_recommendation
+                "detailed_recommendation": detailed_recommendation,
+                "prediction_text": prediction_text # 新增：返回原始预测文本
             }
         }
         
@@ -224,6 +228,7 @@ def mock_assistant_analysis(stock_code):
     }
     
     analysis = mock_analyses.get(stock_code, default_analysis)
+    prediction_text = analysis['对未来一周的趋势方向及可能变动幅度估计'] # 新增：获取预测文本
     
     # 构建详细建议字符串
     detailed_recommendation = (
@@ -234,7 +239,10 @@ def mock_assistant_analysis(stock_code):
         f"\n📝 注意：当前为模拟数据模式"
     )
     
-    return {"detailed_recommendation": detailed_recommendation}
+    return {
+        "detailed_recommendation": detailed_recommendation,
+        "prediction_text": prediction_text # 新增：返回原始预测文本
+    }
 
 def get_stock_data(stock_code, use_mock=False):
     """统一的数据获取函数，根据模式选择真实数据或模拟数据"""
@@ -313,30 +321,97 @@ def get_attention_level(sentiment_score, key_events):
     else:
         return "😴 关注较少"
 
-def generate_prediction_chart(stock_code):
+# 新增：用于解析AI预测文本的辅助函数
+def parse_prediction_text(text):
+    """解析预测文本，提取方向和幅度。例如 '预计上涨3-5%'"""
+    direction = 'neutral'
+    min_change = 0.0
+    max_change = 0.0
+
+    # 确定方向
+    if '上涨' in text or '看涨' in text:
+        direction = 'up'
+    elif '下跌' in text or '看跌' in text:
+        direction = 'down'
+    
+    # 使用正则表达式提取所有数字
+    matches = re.findall(r'([\d\.]+)', text)
+    
+    if len(matches) == 1:
+        min_change = max_change = float(matches[0])
+    elif len(matches) >= 2:
+        min_change = float(matches[0])
+        max_change = float(matches[1])
+
+    # 处理 '±' 符号
+    if '±' in text and len(matches) == 1:
+        val = float(matches[0])
+        min_change, max_change = -val, val
+        direction = 'neutral'
+    
+    # 如果是下跌，幅度应为负数
+    if direction == 'down':
+        min_change, max_change = -abs(max_change), -abs(min_change)
+
+    return direction, min_change / 100.0, max_change / 100.0
+
+
+def generate_prediction_chart(stock_code, assistant_data):
     try:
-        """生成价格预测图表"""
+        """根据AI分析生成价格预测图表"""
+        prediction_text = assistant_data.get("prediction_text", "趋势未知")
+        
+        # 1. 解析预测文本以获取趋势和幅度
+        direction, min_change, max_change = parse_prediction_text(prediction_text)
+
+        # 2. 生成基准价格和日期
         base_price = random.randint(30, 100)
         dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
-        prices = [round(base_price * (1 + 0.02*i) + random.uniform(-1,1), 2) for i in range(7)]
         
+        # 3. 根据解析结果生成价格序列
+        prices = [base_price]
+        # 确定一个在预测范围内的随机目标价
+        final_price_target = base_price * (1 + random.uniform(min_change, max_change))
+        
+        # 生成中间价格点，使其趋势大致正确，并增加随机性
+        for i in range(1, 7):
+            # 线性插值到目标价
+            trend_price = base_price + (final_price_target - base_price) * (i / 6.0)
+            # 增加随机波动，使图表看起来更真实
+            random_noise = random.uniform(-0.015, 0.015) * base_price
+            next_price = trend_price + random_noise
+            prices.append(round(next_price, 2))
+        
+        # 确保最后一个点精确落在目标价上
+        prices[-1] = round(final_price_target, 2)
+
+        # 4. 绘制图表
         df = pd.DataFrame({"日期": dates, "价格": prices})
         
         fig, ax = plt.subplots(figsize=(8,5))
-        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o")
-        ax.set_title("未来一周价格预测", fontsize=14)
+        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o", color="#0284c7", markerfacecolor="#38bdf8")
+        ax.set_title(f"未来一周价格预测 ({prediction_text})", fontsize=14)
         ax.set_xlabel("日期", fontsize=12)
         ax.set_ylabel("价格 (元)", fontsize=12)
-        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.grid(True, linestyle="--", alpha=0.6)
         plt.tight_layout()
         
+        # 5. 返回格式化结果
+        final_change_rate = (prices[-1] / prices[0] - 1) * 100
+        if final_change_rate > 0.1:
+            final_direction = "看涨 ▲"
+        elif final_change_rate < -0.1:
+            final_direction = "看跌 ▼"
+        else:
+            final_direction = "震荡 →"
+
         return {
-            "direction": "看涨 ▲" if prices[-1] > prices[0] else "看跌 ▼",
-            "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
+            "direction": final_direction,
+            "change_rate": f"{final_change_rate:.2f}%",
             "chart": fig
         }
-    except:
-        print(f"生成图表失败: {e}")
+    except Exception as e:
+        print(f"❌ 生成图表失败: {e}")
         # 创建错误图表
         fig, ax = plt.subplots(figsize=(8,5))
         ax.text(0.5, 0.5, "图表生成失败\n请检查数据", 
@@ -376,6 +451,10 @@ def save_user_preference(preference, analysis_context):
     """将用户的投资偏好和分析上下文保存到文件中"""
     if not preference:
         return "⚠️ 请先做出选择", gr.update(visible=True)
+
+    # 修复：确保 analysis_context 是字典
+    if not isinstance(analysis_context, dict):
+        return "❌ 系统错误：分析上下文丢失，请重新分析后再反馈", gr.update(visible=True)
 
     stock_code = analysis_context.get("stock_code", "N/A")
     prediction_direction = analysis_context.get("prediction", {}).get("direction", "N/A")
@@ -449,7 +528,7 @@ def analyze_stock(stock_code, use_mock_data):
         sentiment_data = eval_result["sentiment_data"]
         assistant_data = eval_result.get("assistant_data", {})
         
-        prediction = generate_prediction_chart(stock_code)
+        prediction = generate_prediction_chart(stock_code, assistant_data)
         formatted_kline = format_kline_display(kline_data)
         formatted_sentiment = format_sentiment_display(sentiment_data)
         
@@ -494,7 +573,7 @@ def analyze_stock(stock_code, use_mock_data):
                 sentiment_data = eval_result["sentiment_data"]
                 assistant_data = eval_result.get("assistant_data", {})
                 
-                prediction = generate_prediction_chart(stock_code)
+                prediction = generate_prediction_chart(stock_code, assistant_data)
                 formatted_kline = format_kline_display(kline_data)
                 formatted_sentiment = format_sentiment_display(sentiment_data)
                 
@@ -562,14 +641,16 @@ with gr.Blocks(
             mock_data_checkbox = gr.Checkbox(
                 label="使用模拟数据",
                 value=USE_MOCK_DATA,
-                info="勾选此选项将使用模拟数据进行分析"
+                info="勾选此选项将使用模拟数据进行分析",
+                visible=False  # 隐藏此开关
             )
         with gr.Column(scale=1):
             analyze_btn = gr.Button("🔍 立即分析", variant="primary", size="md")
     
     # 显示当前模式
     mode_status = gr.Markdown(
-        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}"
+        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}",
+        visible=False # 隐藏模式状态显示
     )
     
     with gr.Row(equal_height=True):
