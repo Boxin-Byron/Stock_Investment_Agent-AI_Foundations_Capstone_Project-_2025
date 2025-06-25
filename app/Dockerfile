@@ -5,6 +5,15 @@ FROM python:3.10-slim
 WORKDIR /app
 ENV TZ=Asia/Shanghai
 
+# 删除官方 debian.sources，避免官方源被读取
+RUN rm -f /etc/apt/sources.list.d/debian.sources
+
+# 新建 sources.list 覆盖官方源为清华源
+RUN echo "deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main contrib non-free non-free-firmware\n\
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main contrib non-free non-free-firmware\n\
+deb https://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-backports main contrib non-free non-free-firmware\n\
+deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main contrib non-free non-free-firmware" > /etc/apt/sources.list
+
 # 安装系统依赖和中文字体
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -37,7 +46,8 @@ RUN mkdir -p /usr/share/fonts/chinese && \
 COPY requirements.txt .
 
 # 安装Python依赖
-RUN pip install --upgrade pip --no-cache-dir && \
+RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --upgrade pip --no-cache-dir && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY . .
