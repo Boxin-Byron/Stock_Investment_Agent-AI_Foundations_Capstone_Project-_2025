@@ -8,6 +8,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 import csv
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
@@ -318,18 +319,57 @@ def get_attention_level(sentiment_score, key_events):
     else:
         return "😴 关注较少"
 
-def generate_prediction_chart(stock_code):
+def generate_prediction_chart(stock_code, assistant_data):
+    """根据AI助手的分析，生成更智能的价格预测图表"""
     try:
-        """生成价格预测图表"""
+        # 默认值
+        trend_direction = "震荡"
+        change_min, change_max = 1.0, 2.0 # 默认震荡幅度
+
+        # 从 assistant_data 中提取趋势预测文本
+        recommendation_text = assistant_data.get("detailed_recommendation", "")
+        trend_text_line = ""
+        for line in recommendation_text.split('\n'):
+            if "未来一周趋势" in line:
+                trend_text_line = line.strip()
+                break
+        
+        # 解析趋势和幅度
+        if "上涨" in trend_text_line:
+            trend_direction = "上涨"
+        elif "下跌" in trend_text_line:
+            trend_direction = "下跌"
+        
+        numbers = [float(n) for n in re.findall(r'\d+\.?\d*', trend_text_line)]
+        if len(numbers) >= 2:
+            change_min, change_max = min(numbers), max(numbers)
+        elif len(numbers) == 1:
+            change_min = change_max = numbers[0]
+
+        # 生成价格数据
         base_price = random.randint(30, 100)
         dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
-        prices = [round(base_price * (1 + 0.02*i) + random.uniform(-1,1), 2) for i in range(7)]
+        prices = [base_price]
         
+        if trend_direction == "上涨":
+            total_change_percent = random.uniform(change_min, change_max) / 100.0
+        elif trend_direction == "下跌":
+            total_change_percent = -random.uniform(change_min, change_max) / 100.0
+        else: # 震荡
+            total_change_percent = random.uniform(-change_max, change_max) / 100.0
+
+        # 生成平滑但有随机性的路径
+        for i in range(1, 7):
+            daily_target_price = base_price * (1 + total_change_percent * (i / 6))
+            noise = random.uniform(-0.01, 0.01) * base_price # 1%的日内波动
+            next_price = daily_target_price + noise
+            prices.append(round(next_price, 2))
+
         df = pd.DataFrame({"日期": dates, "价格": prices})
         
         fig, ax = plt.subplots(figsize=(8,5))
-        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o")
-        ax.set_title("未来一周价格预测", fontsize=14)
+        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o", color="green" if trend_direction == "上涨" else "red" if trend_direction == "下跌" else "grey")
+        ax.set_title("未来一周价格预测 (基于AI分析)", fontsize=14)
         ax.set_xlabel("日期", fontsize=12)
         ax.set_ylabel("价格 (元)", fontsize=12)
         ax.grid(True, linestyle="--", alpha=0.7)
@@ -340,7 +380,7 @@ def generate_prediction_chart(stock_code):
             "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
             "chart": fig
         }
-    except:
+    except Exception as e:
         print(f"生成图表失败: {e}")
         # 创建错误图表
         fig, ax = plt.subplots(figsize=(8,5))
@@ -487,7 +527,7 @@ def analyze_stock(stock_code, use_mock_data):
         sentiment_data = eval_result["sentiment_data"]
         assistant_data = eval_result.get("assistant_data", {})
         
-        prediction = generate_prediction_chart(stock_code)
+        prediction = generate_prediction_chart(stock_code, assistant_data)
         
         kline_text = format_kline_display(kline_data)
         sentiment_text = format_sentiment_display(sentiment_data)
