@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 # 从环境变量获取配置
-MAIRUI_LICENCE = os.getenv('MAIRUI_LICENCE', "9914AFE5-493E-41DD-9C02-4F7145666C13")  # 默认值用于本地开发
+MAIRUI_LICENCE = os.getenv('MAIRUI_LICENCE', "729CC7E2-4C71-47E9-AF94-7CC46C3BE418")  # 默认值用于本地开发
 
 def format_mairui_code(code: str):
     return code + ".SH" if code.startswith("6") else code + ".SZ"
