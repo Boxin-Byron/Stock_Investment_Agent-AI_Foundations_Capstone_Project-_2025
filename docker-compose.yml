@@ -16,12 +16,17 @@ services:
       # 设置 FastAPI 和 Uvicorn 日志级别
       LOG_LEVEL: "DEBUG"
       UVICORN_LOG_LEVEL: "debug"
+      # 新增：设置用户数据路径的环境变量
+      USER_DATA_PATH: "/monitor/user_data"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]  # 使用代码中的健康检查端点
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
+    # 新增：将主机上的用户数据目录挂载到容器内
+    volumes:
+      - ./app/user_data:/monitor/user_data:ro # "ro" 表示只读挂载
     # 添加重启策略
     restart: unless-stopped
     networks:

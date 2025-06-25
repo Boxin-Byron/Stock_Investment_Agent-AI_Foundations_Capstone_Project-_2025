@@ -562,14 +562,16 @@ with gr.Blocks(
             mock_data_checkbox = gr.Checkbox(
                 label="使用模拟数据",
                 value=USE_MOCK_DATA,
-                info="勾选此选项将使用模拟数据进行分析"
+                info="勾选此选项将使用模拟数据进行分析",
+                visible=False  # 隐藏此开关
             )
         with gr.Column(scale=1):
             analyze_btn = gr.Button("🔍 立即分析", variant="primary", size="md")
     
     # 显示当前模式
     mode_status = gr.Markdown(
-        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}"
+        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}",
+        visible=False # 隐藏模式状态显示
     )
     
     with gr.Row(equal_height=True):

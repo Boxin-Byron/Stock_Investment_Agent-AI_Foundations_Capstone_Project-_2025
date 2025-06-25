@@ -10,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 import time
 import re
+import csv
+import glob
 
 # 从环境变量获取配置
 
@@ -59,17 +61,86 @@ def contains_chinese(text):
     return False
 
 
+def get_user_investment_style():
+    """
+    根据用户历史偏好判断其投资风格。
+    该函数会查找最新的偏好文件并进行分析。
+    """
+    try:
+        # 优先从环境变量获取外部数据路径
+        data_dir_override = os.getenv("USER_DATA_PATH")
+        
+        if data_dir_override and os.path.isdir(data_dir_override):
+            # 如果设置了环境变量且路径有效，则使用该路径
+            data_dir = data_dir_override
+            print(f"ℹ️ 使用环境变量指定的数据目录: {data_dir}")
+        else:
+            # 否则，回退到原来的相对路径
+            script_dir = os.path.dirname(__file__)
+            data_dir = os.path.join(script_dir, '..', 'app', 'user_data')
+            print(f"ℹ️ 使用默认相对数据目录: {data_dir}")
+
+        # 查找所有 user_preferences_*.csv 文件
+        file_pattern = os.path.join(data_dir, 'user_preferences_*.csv')
+        preference_files = glob.glob(file_pattern)
+
+        if not preference_files:
+            print(f"⚠️ 在 {data_dir} 中未找到任何用户偏好文件，不添加额外prompt。")
+            return ""
+
+        # 按文件名排序，获取最新的文件
+        latest_file = sorted(preference_files, reverse=True)[0]
+        print(f"✅ 成功找到最新的偏好文件: {latest_file}")
+
+        down_buy_count = 0  # 看跌时买入次数
+        up_buy_count = 0    # 看涨时买入次数
+        total_willing = 0   # 总“愿意”次数
+
+        with open(latest_file, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get('用户偏好') == '愿意':
+                    total_willing += 1
+                    trend = row.get('预测趋势', '')
+                    if '看跌' in trend:
+                        down_buy_count += 1
+                    elif '看涨' in trend:
+                        up_buy_count += 1
+        
+        if total_willing < 2:
+            print(f"ℹ️ 数据不足 (愿意次数: {total_willing})，不添加额外prompt。")
+            return ""
+
+        if down_buy_count > up_buy_count:
+            return "我是一名激进的投资者，风险承受能力较高。"
+        elif up_buy_count > down_buy_count:
+            return "我是一名保守的投资者，倾向于稳健投资。"
+        
+        return ""
+
+    except Exception as e:
+        print(f"❌ 分析用户偏好时出错: {e}")
+        return ""
+
 def call_dify_flow(stock_code):
     """调用K线分析微服务，返回latest_metrics字典"""
     headers = {
         'Authorization': f'Bearer {DIFY_FLOW_API_KEY}',
         'Content-Type': 'application/json',
     }
+    preference_prompt = get_user_investment_style()
+    base_query = '为我分析这支股票'
+    final_query = f"{base_query}。{preference_prompt}" if preference_prompt else base_query
+    
+    if preference_prompt:
+        print(f"👤 根据用户历史记录，添加了偏好描述: {preference_prompt}")
+    else:
+        print("👤 未检测到用户偏好，使用默认分析。")
     json_data = {
         'inputs': {
             'stock_code': str(stock_code),
         },
-        'query': '为我分析这支股票',
+        'query': final_query, # 使用构建好的最终query
         'response_mode': 'blocking',
         'user': 'abc-123',
     }
