@@ -250,31 +250,36 @@ def get_stock_data(stock_code, use_mock=False):
         return call_stock_eval_api(stock_code)
 
 def format_kline_display(kline_data):
-    """格式化K线数据"""
+    """格式化K线数据为字符串"""
     score = kline_data.get("score", 0)
     highlights = kline_data.get("highlights", [])
     recommendation = kline_data.get("recommendation", "中性")
     
-    return {
-        "📊 综合评分": f"{score:.1f}/10",
-        "🔍 技术亮点": highlights,
-        "💡 分析师建议": recommendation,
-        "⭐ 评级": get_rating_by_score(score)
-    }
+    highlights_str = "\n".join([f"  - {item}" for item in highlights])
+    
+    return (
+        f"📊 综合评分: {score:.1f}/10\n"
+        f"⭐ 评级: {get_rating_by_score(score)}\n"
+        f"💡 分析师建议: {recommendation}\n"
+        f"🔍 技术亮点:\n{highlights_str}"
+    )
 
 def format_sentiment_display(sentiment_data):
-    """格式化情绪数据"""
+    """格式化情绪数据为字符串"""
     sentiment_score = sentiment_data.get("sentiment_score", 0)
     key_events = sentiment_data.get("key_events", [])
     
-    return {
-        "😊 情绪指数": f"{sentiment_score:.2f}",
-        "📈 情绪趋势": get_sentiment_trend(sentiment_score),
-        "📰 关键事件": key_events,
-        "🎯 市场关注度": get_attention_level(sentiment_score, key_events)
-    }
+    events_str = "\n".join([f"  - {item}" for item in key_events])
+
+    return (
+        f"😊 情绪指数: {sentiment_score:.2f}\n"
+        f"📈 情绪趋势: {get_sentiment_trend(sentiment_score)}\n"
+        f"🎯 市场关注度: {get_attention_level(sentiment_score, key_events)}\n"
+        f"📰 关键事件:\n{events_str}"
+    )
 
 def get_rating_by_score(score):
+    if score is None: score = 0
     if score >= 8.0:
         return "⭐⭐⭐⭐⭐ 强烈推荐"
     elif score >= 6.5:
@@ -425,112 +430,113 @@ def create_analysis_block(title, default_content):
     """创建分析区块"""
     with gr.Column(variant="panel", min_width=300) as block:
         gr.Markdown(f"### {title}")
-        json_display = gr.Json(value=default_content, container=False)
-    return block, json_display
+        text_display = gr.Textbox(
+            value=default_content,
+            lines=8,
+            max_lines=15,
+            interactive=False,
+            show_label=False,
+            container=False
+        )
+    return block, text_display
 
 def analyze_stock(stock_code, use_mock_data):
-    """主分析函数"""
+    """主分析函数 - 流式输出版本"""
     if not stock_code.strip():
-         return [
-            {"error": "请输入股票代码"},
-            {"error": "请输入股票代码"},
-            None, "", "", "", "",
-            gr.update(visible=False),  # 隐藏反馈区域
-            {}  # 清空状态
+        yield [
+            gr.update(value="错误: 请输入股票代码"),
+            gr.update(value="错误: 请输入股票代码"),
+            None, "", "", "", 
+            gr.update(value="错误: 请输入股票代码"),
+            gr.update(visible=False),
+            {}
         ]
-    
+        return
+
+    # 初始加载状态
+    outputs = [
+        "分析中...",  # kline_display
+        "分析中...",  # news_display
+        None,  # chart_output
+        "...",  # direction_output
+        "...",  # change_rate_output
+        "...",  # short_recommendation
+        "分析中...",  # detailed_recommendation
+        gr.update(visible=False),  # feedback_box
+        {}  # analysis_context_state
+    ]
+    yield outputs
+
     try:
         print(f"🔍 开始分析股票: {stock_code}")
         
-        # 根据用户选择决定使用真实数据还是模拟数据
-        eval_result = get_stock_data(stock_code, use_mock=use_mock_data)
-        
+        is_fallback = False
+        try:
+            eval_result = get_stock_data(stock_code, use_mock=use_mock_data)
+        except Exception as e:
+            print(f"❌ 股票分析失败，自动切换到模拟模式: {e}")
+            if not use_mock_data:
+                print("🔄 尝试使用模拟数据...")
+                eval_result = get_stock_data(stock_code, use_mock=True)
+                is_fallback = True
+            else:
+                raise e
+
+        # --- 数据准备 ---
         kline_data = eval_result["kline_data"]
         sentiment_data = eval_result["sentiment_data"]
         assistant_data = eval_result.get("assistant_data", {})
         
         prediction = generate_prediction_chart(stock_code)
-        formatted_kline = format_kline_display(kline_data)
-        formatted_sentiment = format_sentiment_display(sentiment_data)
         
-        short_recommendation = generate_investment_recommendation(
+        kline_text = format_kline_display(kline_data)
+        sentiment_text = format_sentiment_display(sentiment_data)
+        short_recommendation_text = generate_investment_recommendation(
             kline_data, sentiment_data, prediction
         )
-        
-        detailed_recommendation = assistant_data.get(
+        detailed_recommendation_text = assistant_data.get(
             "detailed_recommendation", "未获取到详细分析"
         )
+        if is_fallback:
+            detailed_recommendation_text += f"\n\n⚠️ 注意：因后端服务异常，已自动切换至模拟数据模式。"
+
+        # --- 更新静态UI部分 ---
+        outputs[2] = prediction["chart"]
+        outputs[3] = prediction["direction"]
+        outputs[4] = prediction["change_rate"]
+        outputs[5] = short_recommendation_text
         
-        print(f"✅ 分析完成: {stock_code}")
-        
-        # 准备要传递给反馈环节的上下文
+        # --- 流式输出 ---
+        max_len = max(len(kline_text), len(sentiment_text), len(detailed_recommendation_text))
+        for i in range(max_len):
+            if i < len(kline_text):
+                outputs[0] = kline_text[:i+1]
+            if i < len(sentiment_text):
+                outputs[1] = sentiment_text[:i+1]
+            if i < len(detailed_recommendation_text):
+                outputs[6] = detailed_recommendation_text[:i+1]
+            
+            yield outputs
+            time.sleep(0.01)
+
+        # --- 最终状态 ---
         analysis_context = {
             "stock_code": stock_code,
             "prediction": prediction
         }
-        
-        return [
-            formatted_kline,
-            formatted_sentiment,
-            prediction["chart"],
-            prediction["direction"],
-            prediction["change_rate"],
-            short_recommendation,
-            detailed_recommendation,
-            gr.update(visible=True),  # 显示反馈区域
-            analysis_context  # 更新状态
-        ]
-        
+        outputs[7] = gr.update(visible=True)
+        outputs[8] = analysis_context
+        yield outputs
+
     except Exception as e:
-        print(f"❌ 股票分析失败，自动切换到模拟模式: {e}")
-        
-        # 自动降级到模拟数据模式
-        if not use_mock_data:
-            print("🔄 尝试使用模拟数据...")
-            try:
-                eval_result = get_stock_data(stock_code, use_mock=True)
-                
-                kline_data = eval_result["kline_data"]
-                sentiment_data = eval_result["sentiment_data"]
-                assistant_data = eval_result.get("assistant_data", {})
-                
-                prediction = generate_prediction_chart(stock_code)
-                formatted_kline = format_kline_display(kline_data)
-                formatted_sentiment = format_sentiment_display(sentiment_data)
-                
-                short_recommendation = generate_investment_recommendation(
-                    kline_data, sentiment_data, prediction
-                )
-                
-                detailed_recommendation = assistant_data.get("detailed_recommendation", "未获取到详细分析")
-                detailed_recommendation += f"\n\n⚠️ 注意：因后端服务异常，已自动切换至模拟数据模式。"
-                
-                analysis_context = {
-                    "stock_code": stock_code,
-                    "prediction": prediction
-                }
-                
-                return [
-                    formatted_kline,
-                    formatted_sentiment,
-                    prediction["chart"],
-                    prediction["direction"],
-                    prediction["change_rate"],
-                    short_recommendation,
-                    detailed_recommendation,
-                    gr.update(visible=True),  # 显示反馈区域
-                    analysis_context  # 更新状态
-                ]
-                
-            except Exception as fallback_error:
-                print(f"❌ 模拟模式也失败: {fallback_error}")
-        
-        return [
-            {"error": f"分析失败: {str(e)}"},
-            {"error": f"分析失败: {str(e)}"},
+        print(f"❌ 分析彻底失败: {e}")
+        error_msg = f"分析失败: {str(e)}"
+        yield [
+            gr.update(value=error_msg),
+            gr.update(value=error_msg),
             None, "分析失败", "N/A", "系统错误，请重试", "详细分析获取失败",
-            gr.update(visible=False),  # 隐藏反馈区域
-            {}  # 清空状态
+            gr.update(visible=False),
+            {}
         ]
 
 # 界面布局
@@ -562,16 +568,16 @@ with gr.Blocks(
             mock_data_checkbox = gr.Checkbox(
                 label="使用模拟数据",
                 value=USE_MOCK_DATA,
-                info="勾选此选项将使用模拟数据进行分析",
-                visible=False  # 隐藏此开关
+                info="勾选此选项将使用模拟数据进行分析"
+                # visible=False  # 隐藏此开关
             )
         with gr.Column(scale=1):
             analyze_btn = gr.Button("🔍 立即分析", variant="primary", size="md")
     
     # 显示当前模式
     mode_status = gr.Markdown(
-        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}",
-        visible=False # 隐藏模式状态显示
+        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}"
+        #visible=False # 隐藏模式状态显示
     )
     
     with gr.Row(equal_height=True):
