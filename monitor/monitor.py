@@ -182,62 +182,62 @@ def call_dify_flow(stock_code):
 
 
 def calculate_comprehensive_score(metrics: dict, news_result: dict) -> float:
-    """计算综合评分"""
-    # 技术指标权重
-    tech_score = 0
-    tech_weight = 0
-    
-    # RSI影响
+    tech_score = 0.0
+    tech_weight = 0.0
+
+    # RSI
     rsi = metrics.get('daily_technical_indicators', {}).get('rsi')
     if rsi is not None:
         rsi_weight = 0.3
-        # RSI在30-70之间最好，离50越远分数越低
-        rsi_dist = min(abs(rsi - 30), abs(rsi - 70))
-        rsi_score = max(0, 1 - rsi_dist / 20)  # 距离边界20点以内线性递减
+        rsi_dist  = min(abs(rsi - 30), abs(rsi - 70))
+        rsi_score = max(0, 1 - rsi_dist / 20)
         tech_score += rsi_score * rsi_weight
         tech_weight += rsi_weight
-    
-    # MACD影响
+
+    # MACD
     macd_diff = metrics.get('daily_technical_indicators', {}).get('macd_diff')
-    macd_dea = metrics.get('daily_technical_indicators', {}).get('macd_dea')
+    macd_dea  = metrics.get('daily_technical_indicators', {}).get('macd_dea')
     if macd_diff is not None and macd_dea is not None:
         macd_weight = 0.25
-        macd_score = 1 if macd_diff > macd_dea else 0.5  # 金叉看涨
+        macd_score  = 1 if macd_diff > macd_dea else 0.5
         tech_score += macd_score * macd_weight
         tech_weight += macd_weight
-    
-    # 价格变化率影响
-    price_change = metrics.get('price_change_pct', 0)
+
+    # 价格变化率
+    price_change = metrics.get('price_change_pct') or 0.0
     price_weight = 0.2
-    price_score = 0.5 + price_change * 0.1  # 每1%变化影响0.1分
-    tech_score += max(0, min(1, price_score)) * price_weight
+    price_score  = 0.5 + price_change * 0.1
+    price_score  = max(0, min(1, price_score))
+    tech_score  += price_score * price_weight
     tech_weight += price_weight
-    
-    # 布林带位置影响
-    close_price = metrics.get('close')
-    boll_upper = metrics.get('daily_technical_indicators', {}).get('boll_upper')
-    boll_lower = metrics.get('daily_technical_indicators', {}).get('boll_lower')
-    if close_price and boll_upper and boll_lower:
+
+    # 布林带
+    boll_ind = metrics.get('daily_technical_indicators', {})
+    close_price = metrics.get('close') or 0.0
+    boll_upper  = boll_ind.get('boll_upper') or 0.0
+    boll_lower  = boll_ind.get('boll_lower') or 0.0
+    if boll_upper > 0 and boll_lower > 0:
         boll_weight = 0.25
-        boll_mid = (boll_upper + boll_lower) / 2
-        boll_score = 0.5 + (close_price - boll_mid) / (boll_upper - boll_mid) * 0.5
-        tech_score += max(0, min(1, boll_score)) * boll_weight
+        boll_mid    = (boll_upper + boll_lower) / 2
+        boll_score  = 0.5 + (close_price - boll_mid) / (boll_upper - boll_mid) * 0.5
+        boll_score  = max(0, min(1, boll_score))
+        tech_score += boll_score * boll_weight
         tech_weight += boll_weight
-    
-    # 新闻情绪影响
-    sentiment = news_result.get('sentiment_score', 0)
-    sentiment_weight = 0.5
-    sentiment_score = (sentiment + 1) / 2  # 从[-1,1]映射到[0,1]
-    
-    # 综合评分 (技术指标占70%，新闻情绪占30%)
+
+    # 新闻情绪
+    sentiment       = news_result.get('sentiment_score', 0.0)
+    sentiment_score = (sentiment + 1) / 2
+
+    # 综合
     if tech_weight > 0:
-        normalized_tech_score = tech_score / tech_weight
-        total_score = normalized_tech_score * 0.7 + sentiment_score * 0.3
+        normalized = tech_score / tech_weight
+        total      = normalized * 0.7 + sentiment_score * 0.3
     else:
-        total_score = sentiment_score
-    
-    # 映射到5-9分范围
-    return round(5 + total_score * 4, 1)
+        total = sentiment_score
+
+    # 映射到 5-9 分
+    return round(5 + total * 4, 1)
+
 
 def generate_explanation(metrics: dict, news_result: dict) -> dict:
     """生成解释文本和推荐"""
