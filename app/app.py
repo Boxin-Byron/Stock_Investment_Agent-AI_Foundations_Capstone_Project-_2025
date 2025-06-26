@@ -75,45 +75,84 @@ os.makedirs(DATA_DIR, exist_ok=True)
 print(f"📂 用户数据将保存至: {DATA_DIR}")
 
 def call_stock_eval_api(stock_code):
-    """调用后端股票评估API"""
+    """调用后端股票评估API（增强健壮性版本）"""
     try:
         print(f"开始分析股票 {stock_code}...")
         
-       # 创建完整的API URL
         url = f"{DIFY_HOST}/api/stock_eval"
         print(f"🔗 调用API: {url}")
-        # 修改：将数据作为 URL 查询参数发送，而不是 JSON 请求体
         params = {"stock_code": str(stock_code)}
         
-        # 发送请求（POST），使用 params 参数
-        # 增加超时时间以应对可能的慢响应
-        response = requests.post(url, params=params)
-        
-        response.raise_for_status()  # 如果状态码不是2xx，将引发HTTPError
+        response = requests.post(url, params=params, timeout=120) # 增加超时
+        response.raise_for_status()
         
         result = response.json()
         
-        # 获取详细分析数据
+        # --- 健壮性处理核心 ---
         assistant_analysis = result.get("assistant_analysis", {})
-        
-        # 提取详细分析中的关键信息
-        detailed_recommendation = ""  # 初始化为空字符串
-        if isinstance(assistant_analysis, dict) and "recommendation_details" in assistant_analysis:
-            rec_details = assistant_analysis["recommendation_details"]
-            # 单独处理每一项内容
-            evidence = rec_details.get('支持该判断的主要逻辑证据', '无').replace('；', '\n  - ')
-            risks = rec_details.get('潜在风险提示', '无').replace('；', '\n  - ')
+
+        # 1. 如果后端返回的是字符串，尝试解析为JSON
+        if isinstance(assistant_analysis, str):
+            print("⚠️ 后端返回的 assistant_analysis 是字符串，尝试解析...")
+            try:
+                # 清理可能的Markdown代码块标记
+                cleaned_str = assistant_analysis.strip().removeprefix("```json").removesuffix("```").strip()
+                assistant_analysis = json.loads(cleaned_str)
+            except json.JSONDecodeError:
+                print("❌ 解析 assistant_analysis 字符串失败，将作为纯文本处理。")
+                # 解析失败，保持其为字符串，后续逻辑会处理
+
+        # 2. 初始化所有 assistant_data 字段的默认值
+        detailed_recommendation = ""
+        analysis_process = "无分析过程"
+        tech_summary = "无技术总结"
+        news_summary = "无新闻总结"
+
+        # 3. 仅当 assistant_analysis 是字典时，才提取内部字段
+        if isinstance(assistant_analysis, dict):
+            analysis_process = assistant_analysis.get("analysis_process", "无分析过程")
+            tech_summary = assistant_analysis.get("tech_summary", "无技术总结")
+            news_summary = assistant_analysis.get("news_summary", "无新闻总结")
             
-            # 构建详细建议字符串
-            detailed_recommendation = (
-                f"👉 当前建议: {rec_details.get('当前建议', '无')}\n"
-                f"📅 未来一周趋势: {rec_details.get('对未来一周的趋势方向及可能变动幅度估计', '无')}\n"
-                f"🔎 主要支持证据:\n  - {evidence}\n"
-                f"⚠️ 潜在风险:\n  - {risks}"
-            )
+            rec_details = assistant_analysis.get("recommendation_details")
+            
+            if isinstance(rec_details, dict):
+                # 提取主要逻辑证据
+                evidence = (
+                    rec_details.get('支持逻辑') or
+                    rec_details.get('主要逻辑证据') or
+                    rec_details.get('支持该判断的主要逻辑证据', '无')
+                ).replace('；', '\n  - ')
+
+                # 提取潜在风险
+                risks = (
+                    rec_details.get('风险提示') or
+                    rec_details.get('潜在风险提示', '无')
+                ).replace('；', '\n  - ')
+
+                # 提取未来趋势
+                future_trend = (
+                    rec_details.get('未来一周趋势方向') or
+                    rec_details.get('对未来一周的趋势方向及可能变动幅度估计')
+                )
+                if not future_trend:
+                    trend_direction = rec_details.get('对未来一周趋势方向', '')
+                    amplitude = rec_details.get('可能变动幅度', '')
+                    future_trend = f"{trend_direction}{amplitude}" if amplitude else trend_direction
+                future_trend = future_trend or '无'
+
+                detailed_recommendation = (
+                    f"👉 当前建议: {rec_details.get('当前建议', '无')}\n"
+                    f"📅 未来一周趋势: {future_trend}\n"
+                    f"🔎 主要支持证据:\n  - {evidence}\n"
+                    f"⚠️ 潜在风险:\n  - {risks}"
+                )
+            else:
+                # 如果是字典但没有 recommendation_details，则美化输出整个字典
+                detailed_recommendation = json.dumps(assistant_analysis, indent=2, ensure_ascii=False)
         else:
-            # 其他情况处理
-            detailed_recommendation = json.dumps(assistant_analysis, indent=2, ensure_ascii=False)
+            # 如果不是字典（例如，解析失败的字符串），直接显示它
+            detailed_recommendation = str(assistant_analysis)
         
         return {
             "kline_data": {
@@ -126,7 +165,10 @@ def call_stock_eval_api(stock_code):
                 "key_events": result.get("key_events", [])
             },
             "assistant_data": {
-                "detailed_recommendation": detailed_recommendation
+                "detailed_recommendation": detailed_recommendation,
+                "analysis_process": analysis_process,
+                "tech_summary": tech_summary,
+                "news_summary": news_summary
             }
         }
         
@@ -231,11 +273,15 @@ def mock_assistant_analysis(stock_code):
         f"👉 当前建议: {analysis['当前建议']}\n"
         f"📅 未来一周趋势: {analysis['对未来一周的趋势方向及可能变动幅度估计']}\n"
         f"🔎 主要支持证据:\n  - {analysis['支持该判断的主要逻辑证据'].replace('；', chr(10) + '  - ')}\n"
-        f"⚠️ 潜在风险:\n  - {analysis['潜在风险提示'].replace('；', chr(10) + '  - ')}\n"
-        f"\n📝 注意：当前为模拟数据模式"
+        f"⚠️ 潜在风险:\n  - {analysis['潜在风险提示'].replace('；', chr(10) + '  - ')}"
     )
     
-    return {"detailed_recommendation": detailed_recommendation}
+    return {
+        "detailed_recommendation": detailed_recommendation,
+        "analysis_process": f"模拟分析过程：基于对 {stock_code} 的模拟技术指标和新闻情绪，我们得出了以下结论。这是一个模拟的分析过程，用于测试目的。",
+        "tech_summary": "模拟技术总结：模拟的均线系统显示多头排列，模拟的RSI指标处于中性区域。整体技术面模拟为中性偏多。",
+        "news_summary": "模拟新闻总结：近期无重大模拟新闻事件。市场情绪模拟为中性。"
+    }
 
 def get_stock_data(stock_code, use_mock=False):
     """统一的数据获取函数，根据模式选择真实数据或模拟数据"""
@@ -250,7 +296,7 @@ def get_stock_data(stock_code, use_mock=False):
         print(f"🌐 使用真实数据模式分析: {stock_code}")
         return call_stock_eval_api(stock_code)
 
-def format_kline_display(kline_data):
+def format_kline_display(kline_data, tech_summary=None):
     """格式化K线数据为字符串"""
     score = kline_data.get("score", 0)
     highlights = kline_data.get("highlights", [])
@@ -258,25 +304,31 @@ def format_kline_display(kline_data):
     
     highlights_str = "\n".join([f"  - {item}" for item in highlights])
     
+    tech_summary_str = f"\n\n📝 技术总结:\n{tech_summary}" if tech_summary and "无技术总结" not in tech_summary else ""
+    
     return (
         f"📊 综合评分: {score:.1f}/10\n"
         f"⭐ 评级: {get_rating_by_score(score)}\n"
         f"💡 分析师建议: {recommendation}\n"
         f"🔍 技术亮点:\n{highlights_str}"
+        f"{tech_summary_str}"
     )
 
-def format_sentiment_display(sentiment_data):
+def format_sentiment_display(sentiment_data, news_summary=None):
     """格式化情绪数据为字符串"""
     sentiment_score = sentiment_data.get("sentiment_score", 0)
     key_events = sentiment_data.get("key_events", [])
     
     events_str = "\n".join([f"  - {item}" for item in key_events])
 
+    news_summary_str = f"\n\n📝 新闻总结:\n{news_summary}" if news_summary and "无新闻总结" not in news_summary else ""
+
     return (
         f"😊 情绪指数: {sentiment_score:.2f}\n"
         f"📈 情绪趋势: {get_sentiment_trend(sentiment_score)}\n"
         f"🎯 市场关注度: {get_attention_level(sentiment_score, key_events)}\n"
         f"📰 关键事件:\n{events_str}"
+        f"{news_summary_str}"
     )
 
 def get_rating_by_score(score):
@@ -528,15 +580,22 @@ def analyze_stock(stock_code, use_mock_data):
         assistant_data = eval_result.get("assistant_data", {})
         
         prediction = generate_prediction_chart(stock_code, assistant_data)
-        
-        kline_text = format_kline_display(kline_data)
-        sentiment_text = format_sentiment_display(sentiment_data)
+        kline_text = format_kline_display(kline_data, assistant_data.get("tech_summary"))
+        sentiment_text = format_sentiment_display(sentiment_data, assistant_data.get("news_summary"))
         short_recommendation_text = generate_investment_recommendation(
             kline_data, sentiment_data, prediction
         )
+        
+        # 组合分析过程和详细建议
+        analysis_process_text = assistant_data.get("analysis_process", "")
         detailed_recommendation_text = assistant_data.get(
             "detailed_recommendation", "未获取到详细分析"
         )
+        
+        # 如果有分析过程，就把它加在详细建议前面
+        if analysis_process_text and "无分析过程" not in analysis_process_text:
+            detailed_recommendation_text = f"🧠 分析过程:\n{analysis_process_text}\n\n{detailed_recommendation_text}"
+
         if is_fallback:
             detailed_recommendation_text += f"\n\n⚠️ 注意：因后端服务异常，已自动切换至模拟数据模式。"
 
@@ -667,8 +726,8 @@ with gr.Blocks(
                         detailed_recommendation = gr.Textbox(
                             show_label=False,
                             interactive=False,
-                            lines=5,
-                            max_lines=10,
+                            lines=8,
+                            max_lines=15,
                             container=False
                         )
             
