@@ -117,18 +117,28 @@ def call_stock_eval_api(stock_code):
             rec_details = assistant_analysis.get("recommendation_details")
             
             if isinstance(rec_details, dict):
-                # 提取主要逻辑证据
-                evidence = (
+                # -- 提取主要逻辑证据 (增强健壮性) --
+                evidence_val = (
                     rec_details.get('支持逻辑') or
                     rec_details.get('主要逻辑证据') or
                     rec_details.get('支持该判断的主要逻辑证据', '无')
-                ).replace('；', '\n  - ')
+                )
+                # 如果是列表，直接用换行符连接；如果是字符串，则替换分隔符
+                if isinstance(evidence_val, list):
+                    evidence = '\n  - '.join(map(str, evidence_val))
+                else:
+                    evidence = str(evidence_val).replace('；', '\n  - ')
 
-                # 提取潜在风险
-                risks = (
+                # -- 提取潜在风险 (增强健壮性) --
+                risks_val = (
                     rec_details.get('风险提示') or
                     rec_details.get('潜在风险提示', '无')
-                ).replace('；', '\n  - ')
+                )
+                # 如果是列表，直接用换行符连接；如果是字符串，则替换分隔符
+                if isinstance(risks_val, list):
+                    risks = '\n  - '.join(map(str, risks_val))
+                else:
+                    risks = str(risks_val).replace('；', '\n  - ')
 
                 # 提取未来趋势
                 future_trend = (
@@ -304,7 +314,22 @@ def format_kline_display(kline_data, tech_summary=None):
     
     highlights_str = "\n".join([f"  - {item}" for item in highlights])
     
-    tech_summary_str = f"\n\n📝 技术总结:\n{tech_summary}" if tech_summary and "无技术总结" not in tech_summary else ""
+    tech_summary_str = ""
+    # 检查 tech_summary 是否为字典，如果是，则进行格式化
+    if isinstance(tech_summary, dict):
+        lines = ["\n\n📝 技术总结:"]
+        for key, value in tech_summary.items():
+            # 如果值是列表，则进一步格式化
+            if isinstance(value, list):
+                lines.append(f"  - {key}:")
+                for item in value:
+                    lines.append(f"    - {item}")
+            else:
+                lines.append(f"  - {key}: {value}")
+        tech_summary_str = "\n".join(lines)
+    # 如果是普通字符串且不是默认值，则直接使用
+    elif isinstance(tech_summary, str) and "无技术总结" not in tech_summary:
+        tech_summary_str = f"\n\n📝 技术总结:\n{tech_summary}"
     
     return (
         f"📊 综合评分: {score:.1f}/10\n"
@@ -321,7 +346,29 @@ def format_sentiment_display(sentiment_data, news_summary=None):
     
     events_str = "\n".join([f"  - {item}" for item in key_events])
 
-    news_summary_str = f"\n\n📝 新闻总结:\n{news_summary}" if news_summary and "无新闻总结" not in news_summary else ""
+    news_summary_str = ""
+    # 检查 news_summary 是否为字典，如果是，则进行格式化
+    if isinstance(news_summary, dict):
+        lines = ["\n\n📝 新闻总结:"]
+        # 提取情绪倾向
+        sentiment_tendency = news_summary.get('总体情绪倾向及得分', '无')
+        lines.append(f"  - 情绪倾向: {sentiment_tendency}")
+        
+        # 提取关键事件 (增强健壮性)
+        events_list = news_summary.get('关键事件与潜在影响路径', [])
+        if events_list:
+            lines.append("  - 关键事件:")
+            # 如果 events_list 是一个列表，则遍历它
+            if isinstance(events_list, list):
+                for event in events_list:
+                    lines.append(f"    - {event}")
+            # 如果是其他类型（如单个字符串），则直接添加
+            else:
+                lines.append(f"    - {str(events_list)}")
+        news_summary_str = "\n".join(lines)
+    # 如果是普通字符串且不是默认值，则直接使用
+    elif isinstance(news_summary, str) and "无新闻总结" not in news_summary:
+        news_summary_str = f"\n\n📝 新闻总结:\n{news_summary}"
 
     return (
         f"😊 情绪指数: {sentiment_score:.2f}\n"
@@ -525,7 +572,7 @@ def create_analysis_block(title, default_content):
         text_display = gr.Textbox(
             value=default_content,
             lines=8,
-            max_lines=15,
+            max_lines=28,
             interactive=False,
             show_label=False,
             container=False
@@ -667,16 +714,16 @@ with gr.Blocks(
             mock_data_checkbox = gr.Checkbox(
                 label="使用模拟数据",
                 value=USE_MOCK_DATA,
-                info="勾选此选项将使用模拟数据进行分析"
-                # visible=False  # 隐藏此开关
+                info="勾选此选项将使用模拟数据进行分析",
+                visible=False  # 隐藏此开关
             )
         with gr.Column(scale=1):
             analyze_btn = gr.Button("🔍 立即分析", variant="primary", size="md")
     
     # 显示当前模式
     mode_status = gr.Markdown(
-        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}"
-        #visible=False # 隐藏模式状态显示
+        value=f"🎭 当前模式: {'模拟数据模式' if USE_MOCK_DATA else '真实数据模式'}",
+        visible=False # 隐藏模式状态显示
     )
     
     with gr.Row(equal_height=True):
