@@ -1,20 +1,50 @@
 import os
 import random
 import datetime
-from fastapi import FastAPI
 import requests
-from fastapi import HTTPException,Request
+from fastapi import HTTPException,Request,FastAPI
 from openai import OpenAI
-import unicodedata
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import time
 import re
 import csv
-import glob
+import sqlite3
+import contextlib
+from pydantic import BaseModel
+
+# 定义请求体的数据结构
+class UserDecisionRequest(BaseModel):
+    user_id: str               # 用户ID
+    stock_code: str            # 股票代码
+    prediction_trend: str      # 预测趋势（"看涨" / "看跌"）
+    decision: str              # 用户决策（"willing" / "not willing"）
+
+
+# Database setup
+DB_PATH = "user_preferences.db"
+def init_db():
+    """Initialize the SQLite database"""
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        with contextlib.closing(conn.cursor()) as cursor:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    prediction_trend TEXT,
+                    decision TEXT NOT NULL,
+                    decision_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.commit()
+    print(f"🔧 Database initialized at {DB_PATH}")
+    
+# Initialize database when module is loaded
+init_db()
+
 
 # 从环境变量获取配置
-
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-653829eacd30417996f70834039c0414")
 DIFY_FLOW_API_KEY = os.getenv("DIFY_FLOW_API_KEY", "app-Pmqm52DKmWlzsTi07I3uQbSn")
 
@@ -61,74 +91,96 @@ def contains_chinese(text):
     return False
 
 
-def get_user_investment_style():
-    """
-    根据用户历史偏好判断其投资风格。
-    该函数会查找最新的偏好文件并进行分析。
-    """
+def get_user_investment_style(user_id: str):
+    """从SQLite数据库获取用户投资风格"""
+    if not user_id:
+        return ""
+    
     try:
-        # 优先从环境变量获取外部数据路径
-        data_dir_override = os.getenv("USER_DATA_PATH")
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            with contextlib.closing(conn.cursor()) as cursor:
+                cursor.execute('''
+                    SELECT decision, prediction_trend 
+                    FROM user_preferences 
+                    WHERE user_id = ? AND decision = 'willing'
+                ''', (user_id,))
+                rows = cursor.fetchall()
         
-        if data_dir_override and os.path.isdir(data_dir_override):
-            # 如果设置了环境变量且路径有效，则使用该路径
-            data_dir = data_dir_override
-            print(f"ℹ️ 使用环境变量指定的数据目录: {data_dir}")
-        else:
-            # 否则，回退到原来的相对路径
-            script_dir = os.path.dirname(__file__)
-            data_dir = os.path.join(script_dir, '..', 'app', 'user_data')
-            print(f"ℹ️ 使用默认相对数据目录: {data_dir}")
-
-        # 查找所有 user_preferences_*.csv 文件
-        file_pattern = os.path.join(data_dir, 'user_preferences_*.csv')
-        preference_files = glob.glob(file_pattern)
-
-        if not preference_files:
-            print(f"⚠️ 在 {data_dir} 中未找到任何用户偏好文件，不添加额外prompt。")
+        if not rows:
+            print("ℹ️ 未找到用户偏好")
             return ""
-
-        # 按文件名排序，获取最新的文件
-        latest_file = sorted(preference_files, reverse=True)[0]
-        print(f"✅ 成功找到最新的偏好文件: {latest_file}")
-
-        down_buy_count = 0  # 看跌时买入次数
-        up_buy_count = 0    # 看涨时买入次数
-        total_willing = 0   # 总“愿意”次数
-
-        with open(latest_file, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if row.get('用户偏好') == '愿意':
-                    total_willing += 1
-                    trend = row.get('预测趋势', '')
-                    if '看跌' in trend:
-                        down_buy_count += 1
-                    elif '看涨' in trend:
-                        up_buy_count += 1
         
-        if total_willing < 2:
-            print(f"ℹ️ 数据不足 (愿意次数: {total_willing})，不添加额外prompt。")
-            return ""
-
+        down_buy_count = up_buy_count = 0
+        
+        for row in rows:
+            decision, trend = row
+            if trend and "看跌" in trend:
+                down_buy_count += 1
+            if trend and "看涨" in trend:
+                up_buy_count += 1
+        
         if down_buy_count > up_buy_count:
-            return "我是一名激进的投资者，风险承受能力较高。"
-        elif up_buy_count > down_buy_count:
             return "我是一名保守的投资者，倾向于稳健投资。"
+        elif up_buy_count > down_buy_count:
+            return "我是一名激进的投资者，风险承受能力较高。"
         
         return ""
-
+    
     except Exception as e:
-        print(f"❌ 分析用户偏好时出错: {e}")
+        print(f"❌ 分析用户偏好错误: {e}")
         return ""
 
-def call_dify_flow(stock_code):
+
+@app.get("/api/user_preferences/{user_id}")
+async def get_user_preferences(user_id: str):
+    """从数据库获取用户决策历史"""
+    try:
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            with contextlib.closing(conn.cursor()) as cursor:
+                cursor.execute('''
+                    SELECT id, user_id, stock_code, prediction_trend, decision, decision_time 
+                    FROM user_preferences 
+                    WHERE user_id = ?
+                    ORDER BY decision_time DESC
+                ''', (user_id,))
+                rows = cursor.fetchall()
+                
+                if not rows:
+                    return {"message": "未找到用户偏好记录"}
+                
+                return [dict(row) for row in rows]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据库错误: {str(e)}")
+
+@app.post("/api/user_decision")
+async def save_user_decision(decision: UserDecisionRequest):
+    """保存用户投资决策到数据库"""
+    try:
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            with contextlib.closing(conn.cursor()) as cursor:
+                cursor.execute('''
+                    INSERT INTO user_preferences (user_id, stock_code, prediction_trend, decision)
+                    VALUES (?, ?, ?, ?)
+                ''', (decision.user_id, decision.stock_code, decision.prediction_trend, decision.decision))
+                conn.commit()
+        return {"status": "success", "message": "决策保存成功"}
+    
+    except sqlite3.Error as e:
+        return {"status": "error", "message": f"数据库错误: {str(e)}"}
+    except Exception as e:
+        return {"status": "error", "message": f"系统错误: {str(e)}"}
+
+
+
+def call_dify_flow(stock_code: str,user_id: str = "default_user"):
     """调用K线分析微服务，返回latest_metrics字典"""
     headers = {
         'Authorization': f'Bearer {DIFY_FLOW_API_KEY}',
         'Content-Type': 'application/json',
     }
-    preference_prompt = get_user_investment_style()
+    preference_prompt = get_user_investment_style(user_id)
     base_query = '为我分析这支股票'
     final_query = f"{base_query}。{preference_prompt}" if preference_prompt else base_query
     
@@ -332,6 +384,8 @@ def process_dify_flow_outputs(dify_flow_output):
                 {"error": "解析失败"},
                 {"error": "分析失败"}
             ]
+
+
 @app.get("/health")
 async def health_check():
     print(f"🏥 健康检查: {datetime.datetime.now().isoformat()}")
@@ -367,21 +421,31 @@ def network_test():
 
 
 @app.post("/api/stock_eval")
-def stock_eval(stock_code: str,request: Request):
-    # client_host = request.client.host if request.client else "unknown"
-    # print(f"📥 收到请求 from {client_host}: {request.url}")
+async def stock_eval(request: Request):  # 添加 async 关键字
     try:
+        # 使用 await 获取 JSON 数据
+        print(f"📬 收到请求: {request.method} {request.url}")
+        body = await request.json()
+        print(f"📥 收到请求体: {body}")
+        stock_code = body.get("stock_code")
+        user_id = body.get("user_id", "default_user")
+        print(f"📊 分析股票: {stock_code}, 用户ID: {user_id}")
         print(f"📊 分析股票: {stock_code}")
+
         if contains_chinese(stock_code):
             stock_code = get_stock_code_with_deepseek(stock_code)
 
         dify_flow_output = call_dify_flow(stock_code)
+        print(f"📦 Dify Flow 输出: {dify_flow_output}")
         processed_data = process_dify_flow_outputs(dify_flow_output)
+        print(f"🔍 处理后的数据: {processed_data}")
+
         kline_result = processed_data[0]
         news_result = processed_data[1]
         text = news_result['data']['outputs']['text'].replace('```json', '').replace('```', '').strip()
         text = re.sub(r'\n\s*', '', text)  # 去除换行和多余空格
         news_result = json.loads(text) # 输出 key_events 列表
+
         assistant_result = processed_data[2]
         print(f"📈 K线分析结果: {kline_result}")
         print(f"📰 新闻分析结果: {news_result}")
@@ -402,10 +466,12 @@ def stock_eval(stock_code: str,request: Request):
         sentiment_score = 0.0
         key_events = []
         if news_result:
+            # 提取情绪分数和关键事件
             sentiment_score = news_result.get('sentiment_score', 0.0)
             key_events = news_result.get('key_events', [])
         
         print(f"📰 新闻情绪: {sentiment_score}, 关键事件: {key_events}")
+
         # 处理助手分析数据
         assistant_analysis = ""
         if assistant_result:

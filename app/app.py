@@ -9,7 +9,6 @@ import sys
 from datetime import datetime, timedelta
 import csv
 import re
-
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 import platform
@@ -69,21 +68,19 @@ DIFY_HOST = os.getenv("DIFY_HOST", "http://monitor:5001")
 # 添加模拟模式开关
 USE_MOCK_DATA = os.getenv("USE_MOCK_DATA", "false").lower() == "true"
 
-# 增强路径处理 - 使用当前目录下的data文件夹
-DATA_DIR = os.path.join(os.getcwd(), "user_data")
-os.makedirs(DATA_DIR, exist_ok=True)
-print(f"📂 用户数据将保存至: {DATA_DIR}")
 
-def call_stock_eval_api(stock_code):
-    """调用后端股票评估API（增强健壮性版本）"""
+def call_stock_eval_api(stock_code, params=None):
+    """调用后端股票评估API"""
+    print(params)
+    if params is None:
+        params = {}
     try:
         print(f"开始分析股票 {stock_code}...")
         
         url = f"{DIFY_HOST}/api/stock_eval"
-        print(f"🔗 调用API: {url}")
-        params = {"stock_code": str(stock_code)}
+        print(f"🔗 调用API: {url} 参数: {params}")
         
-        response = requests.post(url, params=params, timeout=120) # 增加超时
+        response = requests.post(url, json=params, timeout=120) # 增加超时
         response.raise_for_status()
         
         result = response.json()
@@ -516,54 +513,44 @@ def generate_investment_recommendation(kline_data, sentiment_data, prediction):
     else:
         return "🚨 建议卖出 - 多项指标显示负面信号"
 
+# 删除整个 save_user_preference 函数，用以下代码替代：
 def save_user_preference(preference, analysis_context):
-    """将用户的投资偏好和分析上下文保存到文件中"""
+    """将用户的投资决策保存到数据库"""
     if not preference:
         return "⚠️ 请先做出选择", gr.update(visible=True)
-
+    # 映射前端选择到后端需要的值
+    decision_mapping = {
+        "愿意": "willing",
+        "不愿意": "not willing",
+        "中立": "not willing"  # 中立也视为不愿意
+    }
+    
     stock_code = analysis_context.get("stock_code", "N/A")
     prediction_direction = analysis_context.get("prediction", {}).get("direction", "N/A")
     
-    # 添加时间戳确保唯一性
-    timestamp = datetime.now().strftime('%Y-%m-%d')
-    filename = f"user_preferences_{timestamp}.csv"
-    filepath = os.path.join(DATA_DIR, filename)
+    try:
+        # 调用后端的保存接口
+        url = f"{DIFY_HOST}/api/user_decision"
+        data = {
+            "user_id": "web_user",  # 暂时使用固定用户ID
+            "stock_code": stock_code,
+            "prediction_trend": prediction_direction,
+            "decision": decision_mapping.get(preference, "not willing")
+        }
+        
+        response = requests.post(url, json=data, timeout=5)
+        response.raise_for_status()
+        
+        print(f"✅ 用户决策已保存至数据库: {data}")
+        return "✅ 感谢您的反馈，决策已保存！", gr.update(visible=False)
     
-    # 写入CSV文件
-    try:
-        file_exists = os.path.exists(filepath)
-        with open(filepath, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            if not file_exists:
-                writer.writerow(['时间', '股票代码', '预测趋势', '用户偏好'])
-            
-            writer.writerow([
-                datetime.now().strftime('%H:%M:%S'),
-                stock_code,
-                prediction_direction,
-                preference
-            ])
-        
-        print(f"✅ 用户偏好已保存至: {filepath}")
-        message = f"✅ 感谢反馈！数据保存于: {filepath}\n您可以点击下方'浏览用户数据'查看"
-        return message, gr.update(visible=False)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ 网络错误: {e}")
+        return f"❌ 网络错误: {str(e)}", gr.update(visible=True)
     except Exception as e:
-        print(f"❌ 保存用户偏好失败: {e}")
-        return f"❌ 保存失败: {e}", gr.update(visible=True)
+        print(f"❌ 保存用户决策失败: {e}")
+        return f"❌ 保存失败: {str(e)}", gr.update(visible=True)
 
-def get_saved_user_prefs():
-    """获取所有保存的用户偏好文件"""
-    try:
-        # 获取目录下所有CSV文件
-        files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv')]
-        
-        # 按修改时间排序（最新在前）
-        files.sort(key=lambda x: os.path.getmtime(os.path.join(DATA_DIR, x)), reverse=True)
-        
-        return files
-    except Exception as e:
-        print(f"❌ 获取用户偏好文件列表失败: {e}")
-        return []
 
 def create_analysis_block(title, default_content):
     """创建分析区块"""
@@ -592,6 +579,8 @@ def analyze_stock(stock_code, use_mock_data):
         ]
         return
 
+    # 实际应用中应从session/cookie获取
+    user_id = "web_user" if not use_mock_data else "mock_user"
     # 初始加载状态
     outputs = [
         "分析中...",  # kline_display
@@ -611,7 +600,12 @@ def analyze_stock(stock_code, use_mock_data):
         
         is_fallback = False
         try:
-            eval_result = get_stock_data(stock_code, use_mock=use_mock_data)
+            if not use_mock_data:
+                # 添加user_id参数
+                params = {"stock_code": str(stock_code), "user_id": user_id}
+                eval_result = call_stock_eval_api(stock_code, params)
+            else:
+                eval_result = get_stock_data(stock_code, use_mock=True)
         except Exception as e:
             print(f"❌ 股票分析失败，自动切换到模拟模式: {e}")
             if not use_mock_data:
@@ -822,30 +816,9 @@ with gr.Blocks(
 
 
 
-# 在应用启动时
-def check_resources():
-    problems = []
-    # 检查数据目录权限
-    if not os.access(DATA_DIR, os.W_OK):
-        problems.append(f"目录不可写: {DATA_DIR}")
-    
-    # 检查字体可用性
-    try:
-        plt.figure()
-        plt.text(0.5, 0.5, "字体测试", fontsize=12)
-        plt.close()
-    except Exception as e:
-        problems.append(f"字体错误: {str(e)}")
-    
-    return problems
-
 # 修改文件末尾的启动代码
 if __name__ == "__main__":
-    issues = check_resources()
-    if issues:
-        print("❌ 启动前检查失败:")
-        for issue in issues:
-            print(f"  - {issue}")
+
     # Windows 专用处理
     if sys.platform == 'win32':
         print("🛠️ Windows 系统检测 - 启用专用设置")
@@ -860,16 +833,6 @@ if __name__ == "__main__":
     print(f"🔗 DIFY_HOST: {DIFY_HOST}")
     print(f"🌐 服务将在 http://0.0.0.0:7860 启动")
     
-    # 创建初始偏好文件示例（如果目录为空）
-    if not os.listdir(DATA_DIR):
-        sample_file = os.path.join(DATA_DIR, "user_preferences_samples.csv")
-        with open(sample_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['时间', '股票代码', '预测趋势', '用户偏好'])
-            writer.writerow(['09:30:45', '600519', '看涨 ▲', '愿意'])
-            writer.writerow(['10:15:22', '000001', '中性 →', '中立'])
-        print(f"📝 创建示例文件: {sample_file}")
-
     # 强制设置为可外部访问的配置
     app.launch(
         server_name="0.0.0.0",   # 允许所有网络接口访问

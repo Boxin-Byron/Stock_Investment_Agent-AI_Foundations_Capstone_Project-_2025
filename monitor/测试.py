@@ -5,25 +5,21 @@ headers = {
     'Content-Type': 'application/json',
 }
 
-# json_data = {
-#     'inputs': {
-#         'stock_code': '301053',
-#     },
-#     'query': '为我分析这支股票',
-#     'response_mode': 'blocking',
-#     'user': 'abc-123',
-# }
 json_data = {
-    'stock_code': '301053'
+    'inputs': {
+        'stock_code': '301053',
+    },
+    'query': '为我分析这支股票',
+    'response_mode': 'blocking',
+    'user': 'abc-123',
 }
-
 proxies = {
     "http": "http://127.0.0.1:7890",
     "https": "http://127.0.0.1:7890"
 }
-# url = 'https://api.dify.ai/v1/chat-messages'
-url = 'http://localhost:5001/api/stock_eval'
-response = requests.post(url, params=json_data)
+
+response = requests.post('https://api.dify.ai/v1/chat-messages', headers=headers, json=json_data,proxies=proxies)
+
 print(response.status_code)
 print(response.text)
 
