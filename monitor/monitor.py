@@ -12,6 +12,7 @@ import csv
 import sqlite3
 import contextlib
 from pydantic import BaseModel
+from pathlib import Path
 
 # 定义请求体的数据结构
 class UserDecisionRequest(BaseModel):
@@ -21,24 +22,55 @@ class UserDecisionRequest(BaseModel):
     decision: str              # 用户决策（"willing" / "not willing"）
 
 
-# Database setup
-DB_PATH = "user_preferences.db"
+def get_db_path():
+    """智能获取数据库路径"""
+    # 1. 检查环境变量
+    env_path = os.getenv("DB_PATH")
+    if env_path:
+        return env_path
+    
+    # 2. 容器中使用/app/data路径
+    return "/app/data/user_preferences.db"  # Docker容器中的路径
+
+
+DB_PATH = get_db_path()
+print(f"📂 使用数据库路径: {DB_PATH}")
+
 def init_db():
-    """Initialize the SQLite database"""
-    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
-        with contextlib.closing(conn.cursor()) as cursor:
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    stock_code TEXT NOT NULL,
-                    prediction_trend TEXT,
-                    decision TEXT NOT NULL,
-                    decision_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.commit()
-    print(f"🔧 Database initialized at {DB_PATH}")
+    """初始化数据库并确保目录存在"""
+    db_path = Path(DB_PATH)
+    
+    # 确保目录存在
+    db_dir = db_path.parent
+    if not db_dir.exists():
+        db_dir.mkdir(parents=True, exist_ok=True)
+        print(f"📂 创建数据库目录: {db_dir}")
+    
+    # 创建数据库文件（如果不存在）
+    if not db_path.exists():
+        print(f"🔧 初始化新数据库: {DB_PATH}")
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS user_preferences (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        stock_code TEXT NOT NULL,
+                        prediction_trend TEXT,
+                        decision TEXT NOT NULL,
+                        decision_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_user_id 
+                    ON user_preferences(user_id);
+                ''')
+                conn.commit()
+            print(f"✅ 数据库初始化成功")
+        except Exception as e:
+            print(f"❌ 数据库初始化失败: {e}")
+    else:
+        print(f"ℹ️ 使用现有数据库: {DB_PATH}")
     
 # Initialize database when module is loaded
 init_db()
@@ -92,40 +124,48 @@ def contains_chinese(text):
 
 
 def get_user_investment_style(user_id: str):
-    """从SQLite数据库获取用户投资风格"""
-    if not user_id:
+    """从数据库获取用户投资风格 - 优化版"""
+    # 忽略默认用户
+    if not user_id or user_id == "default_user":
         return ""
     
     try:
+        print(f"🔍 查询用户偏好: user_id={user_id}")
+        
         with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            conn.row_factory = sqlite3.Row  # 启用字典格式
             with contextlib.closing(conn.cursor()) as cursor:
+                # 获取所有有效决策
                 cursor.execute('''
-                    SELECT decision, prediction_trend 
+                    SELECT prediction_trend
                     FROM user_preferences 
                     WHERE user_id = ? AND decision = 'willing'
                 ''', (user_id,))
                 rows = cursor.fetchall()
         
+        print(f"ℹ️ 找到 {len(rows)} 条相关记录")
+        
         if not rows:
-            print("ℹ️ 未找到用户偏好")
-            return ""
+            return "我是新用户，还没有明确的投资偏好"
         
-        down_buy_count = up_buy_count = 0
-        
+        # 分析偏好分类
+        buy_dip = 0  # 逢低买入
         for row in rows:
-            decision, trend = row
-            if trend and "看跌" in trend:
-                down_buy_count += 1
-            if trend and "看涨" in trend:
-                up_buy_count += 1
+            trend = row['prediction_trend'] or ""
+            if "看跌" in trend:
+                buy_dip += 1
         
-        if down_buy_count > up_buy_count:
-            return "我是一名保守的投资者，倾向于稳健投资。"
-        elif up_buy_count > down_buy_count:
-            return "我是一名激进的投资者，风险承受能力较高。"
+        # 根据偏好生成描述
+        total_decisions = len(rows)
+        buy_dip_ratio = buy_dip / total_decisions
         
-        return ""
-    
+        if buy_dip_ratio > 0.7:
+            return "我倾向于价值投资，市场下跌时寻找抄底机会"
+        elif buy_dip_ratio < 0.3:
+            return "我偏好趋势投资，更愿意在上涨行情中买入"
+        else:
+            return "我的投资风格比较平衡，市场上涨下跌都会考虑"
+            
     except Exception as e:
         print(f"❌ 分析用户偏好错误: {e}")
         return ""
@@ -450,6 +490,16 @@ async def stock_eval(request: Request):  # 添加 async 关键字
         print(f"📈 K线分析结果: {kline_result}")
         print(f"📰 新闻分析结果: {news_result}")
         print(f"🤖 助手分析结果: {assistant_result}")
+
+        # 处理助手分析结果（可能是字符串或字典）
+        if isinstance(assistant_result, str):
+            try:
+                # 尝试将字符串解析为字典
+                assistant_result = json.loads(assistant_result)
+            except:
+                # 如果解析失败，手动转换为带分析文本的字典
+                assistant_result = {"分析过程": assistant_result, "最终投资建议": assistant_result}
+        # ==== 修复结束 ==== #
         # 处理技术指标数据
         metrics = {}
         if kline_result and 'latest_metrics' in kline_result:
@@ -475,19 +525,40 @@ async def stock_eval(request: Request):  # 添加 async 关键字
         # 处理助手分析数据
         assistant_analysis = ""
         if assistant_result:
-            if '分析过程' in assistant_result and '最终投资建议' in assistant_result:
-                # 结构化返回助手分析的详细信息
+            try:
+                if '分析过程' in assistant_result and '最终投资建议' in assistant_result:
+                    # 结构化返回助手分析的详细信息
+                    assistant_analysis = {
+                        "analysis_process": assistant_result.get('分析过程', ''),
+                        "tech_summary": assistant_result.get('最终投资建议', {}).get('技术面总结', ''),
+                        "news_summary": assistant_result.get('最终投资建议', {}).get('新闻情绪总结', ''),
+                        "recommendation_details": assistant_result.get('最终投资建议', {}).get('综合判断与投资建议', {})
+                    }
+                elif 'raw_content' in assistant_result:
+                    # 对于无法解析的内容，返回原始文本
+                    assistant_analysis = {"raw_analysis": assistant_result['raw_content']}
+                else:
+                    assistant_analysis = {"error": "未获取到有效分析"}
+            except:
+                final_recommendation = assistant_result.get('最终投资建议', '')
+                tech_summary = re.search(r'### 技术面总结(.*?)### 新闻情绪总结', text, re.DOTALL)
+                sentiment_summary = re.search(r'### 新闻情绪总结(.*?)### 综合判断与投资建议', text, re.DOTALL)
+                investment_suggestion = re.search(r'### 综合判断与投资建议(.*)', text, re.DOTALL)
+                # 提取结果
+                if tech_summary and sentiment_summary and investment_suggestion:
+                    tech_summary = tech_summary.group(1).strip()
+                    sentiment_summary = sentiment_summary.group(1).strip()
+                    investment_suggestion = investment_suggestion.group(1).strip()
+                else:
+                    tech_summary = ''
+                    sentiment_summary = ''
+                    investment_suggestion = ''
                 assistant_analysis = {
                     "analysis_process": assistant_result.get('分析过程', ''),
-                    "tech_summary": assistant_result.get('最终投资建议', {}).get('技术面总结', ''),
-                    "news_summary": assistant_result.get('最终投资建议', {}).get('新闻情绪总结', ''),
-                    "recommendation_details": assistant_result.get('最终投资建议', {}).get('综合判断与投资建议', {})
+                    "tech_summary": tech_summary,
+                    "news_summary": sentiment_summary,
+                    "recommendation_details": investment_suggestion
                 }
-            elif 'raw_content' in assistant_result:
-                # 对于无法解析的内容，返回原始文本
-                assistant_analysis = {"raw_analysis": assistant_result['raw_content']}
-            else:
-                assistant_analysis = {"error": "未获取到有效分析"}
 
         print(f"🤖 助手分析: {assistant_analysis}")
         # 计算综合评分

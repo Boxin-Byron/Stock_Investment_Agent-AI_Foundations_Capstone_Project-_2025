@@ -13,6 +13,7 @@ deb https://mirrors.tuna.tsinghua.edu.cn/debian-security bookworm-security main 
 # 安装网络工具
 RUN apt-get update && apt-get install -y \
     curl \
+    sqlite3 \
     iputils-ping \
     dnsutils \
     net-tools \
@@ -24,6 +25,9 @@ RUN pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && 
     pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+# 创建持久化数据目录
+RUN mkdir -p /data && chmod 777 /data
+
 # 禁用 Python 缓冲
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

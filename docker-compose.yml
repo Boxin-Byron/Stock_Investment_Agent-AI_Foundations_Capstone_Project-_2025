@@ -16,8 +16,7 @@ services:
       # 设置 FastAPI 和 Uvicorn 日志级别
       LOG_LEVEL: "DEBUG"
       UVICORN_LOG_LEVEL: "debug"
-      # 新增：设置用户数据路径的环境变量
-      USER_DATA_PATH: "/monitor/user_data"
+      DB_PATH: "/app/data/user_preferences.db"  # 修改为项目目录内的路径
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]  # 使用代码中的健康检查端点
       interval: 10s
@@ -26,7 +25,11 @@ services:
       start_period: 10s
     # 新增：将主机上的用户数据目录挂载到容器内
     volumes:
-      - ./app/user_data:/monitor/user_data:ro # "ro" 表示只读挂载
+      # 关键修改：挂载本地目录到容器中
+      - ./monitor/data:/app/data  # 容器内部的 /app/data 映射到本地的 ./monitor/data
+    # 防止数据丢失的额外挂载
+      - ./monitor/config:/app/config
+      - ./monitor/local-dependencies:/app/local-dependencies
     # 添加重启策略
     restart: unless-stopped
     networks:
@@ -48,7 +51,9 @@ services:
       monitor:
         condition: service_healthy  # 依赖健康状态
     volumes:
-      - ./app/user_data:/app/user_data  # 持久化用户数据
+      # 添加只读访问数据库
+      - ./monitor/data:/data:ro
+      - ./app/user_data:/app/user_data
       - ./app/config:/app/config
     networks:
       - stock-network  # 显式加入网络
@@ -58,5 +63,3 @@ services:
 networks:
   stock-network:
     driver: bridge
-  # stock-network:  # 明确定义网络
-  #   driver: bridge
