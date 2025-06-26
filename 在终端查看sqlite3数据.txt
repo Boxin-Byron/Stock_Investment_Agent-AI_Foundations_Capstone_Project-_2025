@@ -1,0 +1,18 @@
+sqlite3 ./monitor/data/user_preferences.db   # 进入数据库
+.schema user_preferences  # 查看表结构
+.tables # 查看数据库中的表
+
+
+-- 查看前10条数据
+SELECT * FROM user_preferences LIMIT 10;
+
+-- 按用户ID筛选
+SELECT * FROM user_preferences WHERE user_id = 'web_user';
+
+-- 按时间倒序查看
+SELECT * FROM user_preferences ORDER BY decision_time DESC;
+
+-- 统计用户决策数量（分组统计）
+SELECT user_id, decision, COUNT(*) 
+FROM user_preferences 
+GROUP BY user_id, decision;

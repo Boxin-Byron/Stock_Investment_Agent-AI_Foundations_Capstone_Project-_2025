@@ -88,79 +88,24 @@ def call_stock_eval_api(stock_code, params=None):
         # --- 健壮性处理核心 ---
         assistant_analysis = result.get("assistant_analysis", {})
 
-        # 1. 如果后端返回的是字符串，尝试解析为JSON
-        if isinstance(assistant_analysis, str):
-            print("⚠️ 后端返回的 assistant_analysis 是字符串，尝试解析...")
-            try:
-                # 清理可能的Markdown代码块标记
-                cleaned_str = assistant_analysis.strip().removeprefix("```json").removesuffix("```").strip()
-                assistant_analysis = json.loads(cleaned_str)
-            except json.JSONDecodeError:
-                print("❌ 解析 assistant_analysis 字符串失败，将作为纯文本处理。")
-                # 解析失败，保持其为字符串，后续逻辑会处理
-
-        # 2. 初始化所有 assistant_data 字段的默认值
-        detailed_recommendation = ""
-        analysis_process = "无分析过程"
-        tech_summary = "无技术总结"
-        news_summary = "无新闻总结"
-
-        # 3. 仅当 assistant_analysis 是字典时，才提取内部字段
+            # 修复解析逻辑的重点部分
         if isinstance(assistant_analysis, dict):
-            analysis_process = assistant_analysis.get("analysis_process", "无分析过程")
-            tech_summary = assistant_analysis.get("tech_summary", "无技术总结")
-            news_summary = assistant_analysis.get("news_summary", "无新闻总结")
+            # 提取基本信息
+            analysis_process = assistant_analysis.get("analysis_process", "未提供分析过程")
+            tech_summary = assistant_analysis.get("tech_summary", "未提供技术总结")
+            news_summary = assistant_analysis.get("news_summary", "未提供新闻总结")
             
-            rec_details = assistant_analysis.get("recommendation_details")
-            
-            if isinstance(rec_details, dict):
-                # -- 提取主要逻辑证据 (增强健壮性) --
-                evidence_val = (
-                    rec_details.get('支持逻辑') or
-                    rec_details.get('主要逻辑证据') or
-                    rec_details.get('支持该判断的主要逻辑证据', '无')
-                )
-                # 如果是列表，直接用换行符连接；如果是字符串，则替换分隔符
-                if isinstance(evidence_val, list):
-                    evidence = '\n  - '.join(map(str, evidence_val))
-                else:
-                    evidence = str(evidence_val).replace('；', '\n  - ')
-
-                # -- 提取潜在风险 (增强健壮性) --
-                risks_val = (
-                    rec_details.get('风险提示') or
-                    rec_details.get('潜在风险提示', '无')
-                )
-                # 如果是列表，直接用换行符连接；如果是字符串，则替换分隔符
-                if isinstance(risks_val, list):
-                    risks = '\n  - '.join(map(str, risks_val))
-                else:
-                    risks = str(risks_val).replace('；', '\n  - ')
-
-                # 提取未来趋势
-                future_trend = (
-                    rec_details.get('未来一周趋势方向') or
-                    rec_details.get('对未来一周的趋势方向及可能变动幅度估计')
-                )
-                if not future_trend:
-                    trend_direction = rec_details.get('对未来一周趋势方向', '')
-                    amplitude = rec_details.get('可能变动幅度', '')
-                    future_trend = f"{trend_direction}{amplitude}" if amplitude else trend_direction
-                future_trend = future_trend or '无'
-
-                detailed_recommendation = (
-                    f"👉 当前建议: {rec_details.get('当前建议', '无')}\n"
-                    f"📅 未来一周趋势: {future_trend}\n"
-                    f"🔎 主要支持证据:\n  - {evidence}\n"
-                    f"⚠️ 潜在风险:\n  - {risks}"
-                )
-            else:
-                # 如果是字典但没有 recommendation_details，则美化输出整个字典
-                detailed_recommendation = json.dumps(assistant_analysis, indent=2, ensure_ascii=False)
+            # === 重构建detailed_recommendation ===
+            detailed_recommendation = assistant_analysis.get("recommendation_details", "未提供详细建议")
         else:
-            # 如果不是字典（例如，解析失败的字符串），直接显示它
-            detailed_recommendation = str(assistant_analysis)
+            # 如果 assistant_analysis 不是字典，使用默认值
+            analysis_process = "未提供分析过程"
+            tech_summary = "未提供技术总结"
+            news_summary = "未提供新闻总结"
+            detailed_recommendation = "未提供详细建议"
         
+
+
         return {
             "kline_data": {
                 "score": result.get("industry_score", 0),
@@ -567,117 +512,151 @@ def create_analysis_block(title, default_content):
     return block, text_display
 
 def analyze_stock(stock_code, use_mock_data):
-    """主分析函数 - 流式输出版本"""
-    if not stock_code.strip():
-        yield [
-            gr.update(value="错误: 请输入股票代码"),
-            gr.update(value="错误: 请输入股票代码"),
-            None, "", "", "", 
-            gr.update(value="错误: 请输入股票代码"),
-            gr.update(visible=False),
-            {}
-        ]
-        return
-
-    # 实际应用中应从session/cookie获取
-    user_id = "web_user" if not use_mock_data else "mock_user"
-    # 初始加载状态
+    """主分析函数 - 流式输出版本 (已修复)"""
+    # 初始化输出
     outputs = [
-        "分析中...",  # kline_display
-        "分析中...",  # news_display
-        None,  # chart_output
-        "...",  # direction_output
-        "...",  # change_rate_output
-        "...",  # short_recommendation
-        "分析中...",  # detailed_recommendation
-        gr.update(visible=False),  # feedback_box
-        {}  # analysis_context_state
+        "分析中...",            # kline_display
+        "分析中...",            # news_display
+        None,                  # chart_output
+        "分析中...",            # direction_output
+        "分析中...",            # change_rate_output
+        "分析中...",            # short_recommendation
+        "分析中...",            # detailed_recommendation
+        gr.update(visible=False),    # feedback_box
+        {}                  # analysis_context_state
     ]
     yield outputs
-
+    
+    # 处理空输入
+    if not stock_code.strip():
+        yield outputs
+        return
+    
     try:
         print(f"🔍 开始分析股票: {stock_code}")
         
-        is_fallback = False
+        user_id = "web_user"
+        eval_result = {}
+        error_message = ""
+        
+        # ==== 获取数据 ====
         try:
             if not use_mock_data:
-                # 添加user_id参数
-                params = {"stock_code": str(stock_code), "user_id": user_id}
+                params = {"stock_code": stock_code, "user_id": user_id}
                 eval_result = call_stock_eval_api(stock_code, params)
             else:
                 eval_result = get_stock_data(stock_code, use_mock=True)
+                
+            if not eval_result:
+                raise Exception("未获取到有效的分析结果")
+                
         except Exception as e:
-            print(f"❌ 股票分析失败，自动切换到模拟模式: {e}")
-            if not use_mock_data:
-                print("🔄 尝试使用模拟数据...")
+            print(f"❌ 股票分析API调用失败: {str(e)}")
+            error_message = f"后端服务异常: {str(e)[:100]}"
+            
+            # 尝试使用模拟数据回退
+            try:
                 eval_result = get_stock_data(stock_code, use_mock=True)
                 is_fallback = True
-            else:
-                raise e
-
-        # --- 数据准备 ---
-        kline_data = eval_result["kline_data"]
-        sentiment_data = eval_result["sentiment_data"]
+                error_message = ""
+                print("🔄 已使用模拟数据进行回退")
+            except Exception as fallback_ex:
+                print(f"❌ 模拟数据回退失败: {fallback_ex}")
+        
+        # ==== 数据处理 ====
+        kline_data = eval_result.get("kline_data", {"score": 0, "highlights": [], "recommendation": "中性"})
+        sentiment_data = eval_result.get("sentiment_data", {"sentiment_score": 0, "key_events": []})
         assistant_data = eval_result.get("assistant_data", {})
         
-        prediction = generate_prediction_chart(stock_code, assistant_data)
-        kline_text = format_kline_display(kline_data, assistant_data.get("tech_summary"))
-        sentiment_text = format_sentiment_display(sentiment_data, assistant_data.get("news_summary"))
-        short_recommendation_text = generate_investment_recommendation(
-            kline_data, sentiment_data, prediction
-        )
+        # 更新UI - 先更新静态部分，避免长时间的空白
+        # 技术指标展示
+        tech_summary = assistant_data.get("tech_summary", "") or kline_data.get("tech_summary", "无技术总结")
+        kline_text = format_kline_display(kline_data, tech_summary)
+        outputs[0] = kline_text
         
-        # 组合分析过程和详细建议
-        analysis_process_text = assistant_data.get("analysis_process", "")
-        detailed_recommendation_text = assistant_data.get(
-            "detailed_recommendation", "未获取到详细分析"
-        )
+        # 情绪分析展示
+        news_summary = assistant_data.get("news_summary", "") or sentiment_data.get("news_summary", "无新闻总结")
+        sentiment_text = format_sentiment_display(sentiment_data, news_summary)
+        outputs[1] = sentiment_text
         
-        # 如果有分析过程，就把它加在详细建议前面
-        if analysis_process_text and "无分析过程" not in analysis_process_text:
-            detailed_recommendation_text = f"🧠 分析过程:\n{analysis_process_text}\n\n{detailed_recommendation_text}"
-
-        if is_fallback:
-            detailed_recommendation_text += f"\n\n⚠️ 注意：因后端服务异常，已自动切换至模拟数据模式。"
-
-        # --- 更新静态UI部分 ---
-        outputs[2] = prediction["chart"]
-        outputs[3] = prediction["direction"]
-        outputs[4] = prediction["change_rate"]
-        outputs[5] = short_recommendation_text
+        # 生成预测图表
+        try:
+            prediction = generate_prediction_chart(stock_code, assistant_data)
+            outputs[2] = prediction.get("chart", None)
+            outputs[3] = prediction.get("direction", "未知趋势")
+            outputs[4] = prediction.get("change_rate", "0.00%")
+        except Exception as e:
+            print(f"❌ 图表生成失败: {str(e)}")
+            outputs[3] = "图表生成错误"
+            outputs[4] = "0.00%"
         
-        # --- 流式输出 ---
-        max_len = max(len(kline_text), len(sentiment_text), len(detailed_recommendation_text))
-        for i in range(max_len):
-            if i < len(kline_text):
-                outputs[0] = kline_text[:i+1]
-            if i < len(sentiment_text):
-                outputs[1] = sentiment_text[:i+1]
-            if i < len(detailed_recommendation_text):
-                outputs[6] = detailed_recommendation_text[:i+1]
+        # 生成投资推荐
+        try:
+            outputs[5] = generate_investment_recommendation(kline_data, sentiment_data, prediction)
+        except Exception as e:
+            outputs[5] = "建议生成失败"
+            print(f"❌ 投资建议生成失败: {str(e)}")
+        
+        yield outputs  # 第一次部分更新
+        
+        # ==== 构建详细建议 ====
+        detailed_text = ""
+        try:
+            # 组合分析过程和详细建议
+            analysis_process = assistant_data.get("analysis_process", "无分析过程")
+            detailed_recommendation = assistant_data.get("detailed_recommendation", "未获取到详细分析")
+            tech_summary = assistant_data.get("tech_summary", "无技术总结")
+            news_summary = assistant_data.get("news_summary", "无新闻总结")
             
-            yield outputs
-            time.sleep(0.01)
-
-        # --- 最终状态 ---
-        analysis_context = {
+            if "无分析过程" not in analysis_process:
+                detailed_text += f"🧠 分析过程:\n{analysis_process}\n\n"
+            
+            detailed_text += f"📊 技术总结:\n{tech_summary}\n\n"
+            detailed_text += f"📰 新闻总结:\n{news_summary}\n\n"
+            detailed_text += f"💎 详细建议:\n{detailed_recommendation}"
+            
+            if error_message:
+                detailed_text += f"\n\n⚠️ 注意: {error_message}"
+                
+        except Exception as e:
+            detailed_text = f"详细建议生成失败: {str(e)}"
+            print(f"❌ 详细建议生成失败: {str(e)}")
+        
+        # 流式输出详细建议（模拟打字效果）
+        if detailed_text:
+            for i in range(0, len(detailed_text)+1, 5):  # 每次输出5个字符
+                outputs[6] = detailed_text[:i]
+                yield outputs
+                time.sleep(0.05)  # 控制打字速度
+        else:
+            outputs[6] = "无法生成详细建议，请查看日志"
+        
+        # 显示反馈区域
+        outputs[7] = gr.update(visible=True)
+        
+        # 保存分析上下文
+        outputs[8] = {
             "stock_code": stock_code,
             "prediction": prediction
         }
-        outputs[7] = gr.update(visible=True)
-        outputs[8] = analysis_context
-        yield outputs
-
+        
+        yield outputs  # 最终更新
+        
     except Exception as e:
-        print(f"❌ 分析彻底失败: {e}")
-        error_msg = f"分析失败: {str(e)}"
+        print(f"❌ 分析过程发生严重错误: {str(e)}")
+        # 简化错误输出
         yield [
-            gr.update(value=error_msg),
-            gr.update(value=error_msg),
-            None, "分析失败", "N/A", "系统错误，请重试", "详细分析获取失败",
+            "分析失败",
+            "分析失败",
+            None, 
+            "分析失败", 
+            "N/A", 
+            "系统错误，请重试或使用模拟模式", 
+            f"错误详情: {str(e)[:200]}",
             gr.update(visible=False),
             {}
         ]
+
 
 # 界面布局
 with gr.Blocks(

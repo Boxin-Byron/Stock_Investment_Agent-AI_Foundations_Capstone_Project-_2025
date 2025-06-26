@@ -124,47 +124,68 @@ def contains_chinese(text):
 
 
 def get_user_investment_style(user_id: str):
-    """从数据库获取用户投资风格 - 优化版"""
+    """修复后的用户投资风格分析函数"""
     # 忽略默认用户
     if not user_id or user_id == "default_user":
         return ""
     
     try:
-        print(f"🔍 查询用户偏好: user_id={user_id}")
+        print(f"🔍 重新查询用户偏好: user_id={user_id}")
         
         with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
-            conn.row_factory = sqlite3.Row  # 启用字典格式
+            conn.row_factory = sqlite3.Row
             with contextlib.closing(conn.cursor()) as cursor:
-                # 获取所有有效决策
+                # 获取所有决策类型，而不仅是'willing'
                 cursor.execute('''
-                    SELECT prediction_trend
+                    SELECT decision, prediction_trend
                     FROM user_preferences 
-                    WHERE user_id = ? AND decision = 'willing'
+                    WHERE user_id = ?
                 ''', (user_id,))
                 rows = cursor.fetchall()
         
-        print(f"ℹ️ 找到 {len(rows)} 条相关记录")
+        print(f"ℹ️ 找到 {len(rows)} 条用户决策记录")
         
         if not rows:
-            return "我是新用户，还没有明确的投资偏好"
+            return ""
         
-        # 分析偏好分类
-        buy_dip = 0  # 逢低买入
+        # 统计不同类型决策的比例
+        decision_types = {
+            "bullish": 0,  # 看涨决策
+            "bearish": 0,  # 看跌决策
+            "neutral": 0   # 中立决策
+        }
+        
         for row in rows:
+            decision = row['decision']
             trend = row['prediction_trend'] or ""
-            if "看跌" in trend:
-                buy_dip += 1
+            
+            if "看涨" in trend and decision == "willing":
+                decision_types['bullish'] += 1
+            elif "看跌" in trend and decision == "willing":
+                decision_types['bearish'] += 1
+            else:
+                decision_types['neutral'] += 1
+                
+        # 计算各类决策比例
+        total = sum(decision_types.values())
+        if total == 0:
+            return ""
+            
+        bullish_ratio = decision_types['bullish'] / total
+        bearish_ratio = decision_types['bearish'] / total
+        neutral_ratio = decision_types['neutral'] / total
         
-        # 根据偏好生成描述
-        total_decisions = len(rows)
-        buy_dip_ratio = buy_dip / total_decisions
+        print(f"📊 决策比例: 看涨 {bullish_ratio:.1%}, 看跌 {bearish_ratio:.1%}, 中立 {neutral_ratio:.1%}")
         
-        if buy_dip_ratio > 0.7:
+        # 判断用户风格
+        if bullish_ratio > 0.65 and bearish_ratio < 0.2:
+            return "我偏好趋势投资，喜欢在上涨行情中买入"
+        elif bearish_ratio > 0.65 and bullish_ratio < 0.2:
             return "我倾向于价值投资，市场下跌时寻找抄底机会"
-        elif buy_dip_ratio < 0.3:
-            return "我偏好趋势投资，更愿意在上涨行情中买入"
+        elif neutral_ratio > 0.7:
+            return "我通常保持中立态度，偏向观望市场走势"
         else:
-            return "我的投资风格比较平衡，市场上涨下跌都会考虑"
+            return "我的投资风格比较平衡，会根据市场情况灵活调整"
             
     except Exception as e:
         print(f"❌ 分析用户偏好错误: {e}")
@@ -475,7 +496,8 @@ async def stock_eval(request: Request):  # 添加 async 关键字
         if contains_chinese(stock_code):
             stock_code = get_stock_code_with_deepseek(stock_code)
 
-        dify_flow_output = call_dify_flow(stock_code)
+        dify_flow_output = call_dify_flow(stock_code, user_id)  # 正确：传递当前用户的user_id
+
         print(f"📦 Dify Flow 输出: {dify_flow_output}")
         processed_data = process_dify_flow_outputs(dify_flow_output)
         print(f"🔍 处理后的数据: {processed_data}")
@@ -541,6 +563,7 @@ async def stock_eval(request: Request):  # 添加 async 关键字
                     assistant_analysis = {"error": "未获取到有效分析"}
             except:
                 final_recommendation = assistant_result.get('最终投资建议', '')
+                # 使用正则表达式提取分析内容   
                 tech_summary = re.search(r'### 技术面总结(.*?)### 新闻情绪总结', text, re.DOTALL)
                 sentiment_summary = re.search(r'### 新闻情绪总结(.*?)### 综合判断与投资建议', text, re.DOTALL)
                 investment_suggestion = re.search(r'### 综合判断与投资建议(.*)', text, re.DOTALL)
