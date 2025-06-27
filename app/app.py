@@ -774,10 +774,21 @@ def analyze_stock(stock_code, use_mock_data):
         
         # 流式输出详细建议（模拟打字效果）
         if detailed_text:
-            for i in range(0, len(detailed_text)+1, 5):  # 每次输出5个字符
-                outputs[6] = detailed_text[:i]
+            # 修复流式输出逻辑
+            text_length = len(detailed_text)
+            step = 5  # 每次输出5个字符
+            
+            # 从0开始，确保不遗漏任何字符
+            for i in range(0, text_length, step):
+                # 计算结束位置，确保不超过文本长度
+                end_pos = min(i + step, text_length)
+                outputs[6] = detailed_text[:end_pos]
                 yield outputs
                 time.sleep(0.05)  # 控制打字速度
+            
+            # 最终确保完整输出所有文本（冗余保护）
+            outputs[6] = detailed_text
+            yield outputs
         else:
             outputs[6] = "无法生成详细建议，请查看日志"
         
