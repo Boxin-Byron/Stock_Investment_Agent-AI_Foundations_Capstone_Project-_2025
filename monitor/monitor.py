@@ -1,4 +1,3 @@
-
 import os
 import random
 import datetime
@@ -542,11 +541,8 @@ def network_test():
 
 
 @app.post("/api/stock_eval")
-async def stock_eval(request: Request):  # 添加 async 关键字
+async def stock_eval(request: Request):
     try:
-        # 使用 await 获取 JSON 数据
-        print(f"📬 收到请求: {request.method} {request.url}")
-        
         # 支持两种方式：JSON body 和 查询参数
         try:
             body = await request.json()
@@ -557,7 +553,15 @@ async def stock_eval(request: Request):  # 添加 async 关键字
             stock_code = request.query_params.get("stock_code")
             user_id = request.query_params.get("user_id", "default_user")
             body = {"stock_code": stock_code, "user_id": user_id}
-            
+
+        # 输入预处理
+        stock_code = filter_sensitive_words(str(stock_code))
+        user_id = filter_sensitive_words(str(user_id))
+
+        if not is_safe_input(stock_code) or not is_safe_input(user_id) or len(stock_code) != 6:
+            raise HTTPException(status_code=400, detail="输入包含非法字符")
+
+        print(f"📬 收到请求: {request.method} {request.url}")
         print(f"📥 收到请求体: {body}")
         print(f"📊 分析股票: {stock_code}, 用户ID: {user_id}")
         
@@ -745,6 +749,27 @@ async def stock_eval(request: Request):  # 添加 async 关键字
             },
             "raw_data": {"error_info": str(e)}
         }
+
+
+SENSITIVE_WORDS = [
+    "习近平", "法轮功", "六四", "天安门", "新疆", "西藏", "港独", "台独", "暴力", "恐怖", "色情", "赌博",
+    "delete", "drop", "truncate", "update", "insert", "select", "union", "sleep", "--", ";", "/*", "*/"
+]
+
+def filter_sensitive_words(text: str) -> str:
+    """替换敏感词为***"""
+    for word in SENSITIVE_WORDS:
+        text = text.replace(word, "***")
+    return text
+
+def is_safe_input(text: str) -> bool:
+    # 禁止SQL注入常用符号
+    if re.search(r"[;'\"]|--|/\*|\*/", text):
+        return False
+    # 只允许字母、数字、下划线（可根据实际调整）
+    if not re.match(r"^[\w\-]+$", text):
+        return False
+    return True
 
 
 if __name__ == "__main__":
