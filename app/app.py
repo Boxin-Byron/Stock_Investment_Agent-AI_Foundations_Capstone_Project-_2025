@@ -6,12 +6,14 @@ import requests
 import json
 import os
 import sys
+import math
 from datetime import datetime, timedelta
 import csv
 import re
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 import platform
+from typing import List, Union
 
 # 自动适配中英文字体，兼容 Linux 和 Windows，增强健壮性
 def setup_chinese_font():
@@ -365,69 +367,217 @@ def generate_prediction_chart(stock_code, assistant_data):
     try:
         # 默认值
         trend_direction = "震荡"
-        change_min, change_max = 1.0, 2.0 # 默认震荡幅度
-
-        # 从 assistant_data 中提取趋势预测文本
+        change_min, change_max = 1.0, 3.0
+        confidence_level = 0.5  # 置信度
+        
+        # 多维度信息提取
         recommendation_text = assistant_data.get("detailed_recommendation", "")
-        trend_text_line = ""
-        for line in recommendation_text.split('\n'):
-            if "未来一周趋势" in line:
-                trend_text_line = line.strip()
-                break
+        analysis_process = assistant_data.get("analysis_process", "")
+        tech_summary = assistant_data.get("tech_summary", "")
+        news_summary = assistant_data.get("news_summary", "")
         
-        # 解析趋势和幅度
-        if "上涨" in trend_text_line:
+        # 综合文本分析
+        all_text = f"{recommendation_text} {analysis_process} {tech_summary} {news_summary}".lower()
+        
+        # 更智能的趋势识别
+        trend_score = 0
+        trend_keywords = {
+            # 看涨关键词及权重
+            "上涨": 3, "买入": 3, "看好": 2, "积极": 2, "乐观": 2, "强势": 2,
+            "突破": 2, "向上": 1.5, "多头": 2, "利好": 1.5, "推荐": 1,
+            "继续上涨": 3, "持续上升": 2.5, "强烈推荐": 3, "增长": 1.5,
+            
+            # 看跌关键词及权重（负值）
+            "下跌": -3, "卖出": -3, "看空": -2, "悲观": -2, "回调": -1.5,
+            "跌破": -2, "向下": -1.5, "空头": -2, "利空": -1.5, "减仓": -1,
+            "继续下跌": -3, "持续下降": -2.5, "建议卖出": -3, "下滑": -1.5,
+            
+            # 震荡关键词
+            "震荡": 0, "横盘": 0, "整理": 0, "观望": 0, "中性": 0, "持有": 0
+        }
+        
+        # 计算趋势得分
+        for keyword, weight in trend_keywords.items():
+            count = all_text.count(keyword)
+            trend_score += count * weight
+            if count > 0:
+                confidence_level = min(1.0, confidence_level + count * 0.1)
+        
+        # 数字提取和分析
+        price_numbers = []
+        percentage_patterns = [
+            r'(\d+\.?\d*)[-~到至]\s*(\d+\.?\d*)%',  # 范围百分比
+            r'(\d+\.?\d*)%\s*[-~到至]\s*(\d+\.?\d*)%',
+            r'上涨\s*(\d+\.?\d*)%',  # 单独上涨百分比
+            r'下跌\s*(\d+\.?\d*)%',  # 单独下跌百分比
+            r'涨幅\s*(\d+\.?\d*)%',
+            r'跌幅\s*(\d+\.?\d*)%',
+            r'变动\s*(\d+\.?\d*)%',
+            r'幅度.*?(\d+\.?\d*)%',
+        ]
+        
+        for pattern in percentage_patterns:
+            matches = re.findall(pattern, all_text)
+            for match in matches:
+                if isinstance(match, tuple):
+                    price_numbers.extend([float(x) for x in match if x])
+                else:
+                    price_numbers.append(float(match))
+        
+        # 价格区间提取
+        price_range_patterns = [
+            r'(\d+)-(\d+)元',
+            r'(\d+)到(\d+)元',
+            r'(\d+\.?\d*)-(\d+\.?\d*)',
+            r'区间.*?(\d+\.?\d*).*?(\d+\.?\d*)',
+        ]
+        
+        for pattern in price_range_patterns:
+            matches = re.findall(pattern, all_text)
+            for match in matches:
+                try:
+                    low, high = float(match[0]), float(match[1])
+                    if 1 <= low <= 30 and 1 <= high <= 30:  # 合理的百分比范围
+                        price_numbers.extend([low, high])
+                except (ValueError, IndexError):
+                    continue
+        
+        # 过滤合理的数字（1-20%的变动范围）
+        valid_numbers = [n for n in price_numbers if 0.1 <= n <= 20]
+        
+        if valid_numbers:
+            change_min = min(valid_numbers)
+            change_max = max(valid_numbers)
+            # 确保最小值不小于0.5%，最大值不超过15%
+            change_min = max(0.5, change_min)
+            change_max = min(15.0, change_max)
+            if change_max <= change_min:
+                change_max = change_min + 1.0
+        
+        # 趋势方向判断
+        if trend_score > 2:
             trend_direction = "上涨"
-        elif "下跌" in trend_text_line:
+        elif trend_score < -2:
             trend_direction = "下跌"
+        else:
+            trend_direction = "震荡"
         
-        numbers = [float(n) for n in re.findall(r'\d+\.?\d*', trend_text_line)]
-        if len(numbers) >= 2:
-            change_min, change_max = min(numbers), max(numbers)
-        elif len(numbers) == 1:
-            change_min = change_max = numbers[0]
+        # 根据置信度调整变动幅度
+        confidence_multiplier = 0.5 + confidence_level * 0.5  # 0.5-1.0
+        change_min *= confidence_multiplier
+        change_max *= confidence_multiplier
 
         # 生成价格数据
         base_price = random.randint(30, 100)
         dates = [(datetime.now() + timedelta(days=i)).strftime("%m-%d") for i in range(7)]
-        prices = [base_price]
+        prices: List[float] = [float(base_price)]
         
+        # 根据趋势生成目标变化率
         if trend_direction == "上涨":
             total_change_percent = random.uniform(change_min, change_max) / 100.0
         elif trend_direction == "下跌":
             total_change_percent = -random.uniform(change_min, change_max) / 100.0
-        else: # 震荡
-            total_change_percent = random.uniform(-change_max, change_max) / 100.0
+        else:  # 震荡
+            # 震荡模式：先上涨后下跌或相反
+            amplitude = random.uniform(change_min, change_max) / 100.0
+            total_change_percent = random.uniform(-amplitude/2, amplitude/2)
 
-        # 生成平滑但有随机性的路径
-        for i in range(1, 7):
-            daily_target_price = base_price * (1 + total_change_percent * (i / 6))
-            noise = random.uniform(-0.01, 0.01) * base_price # 1%的日内波动
-            next_price = daily_target_price + noise
-            prices.append(round(next_price, 2))
-
-        df = pd.DataFrame({"日期": dates, "价格": prices})
+        # 生成更真实的价格路径
+        volatility = 0.02 * confidence_level  # 基础波动率
         
-        fig, ax = plt.subplots(figsize=(8,5))
-        df.plot(x="日期", y="价格", kind="line", ax=ax, marker="o", color="green" if trend_direction == "上涨" else "red" if trend_direction == "下跌" else "grey")
-        ax.set_title("未来一周价格预测 (基于AI分析)", fontsize=14)
+        if trend_direction == "震荡":
+            # 震荡模式：生成波浪形走势
+            for i in range(1, 7):
+                wave_factor = math.sin(i * math.pi / 3) * 0.01  # 正弦波动
+                daily_noise = random.uniform(-volatility, volatility)
+                trend_component = total_change_percent * (i / 6)
+                
+                next_price = base_price * (1 + trend_component + wave_factor + daily_noise)
+                prices.append(next_price)
+        else:
+            # 趋势模式：平滑但有随机波动的路径
+            for i in range(1, 7):
+                progress = i / 6
+                # 非线性趋势进展（先慢后快或先快后慢）
+                if trend_direction == "上涨":
+                    trend_progress = progress ** 0.8  # 加速上涨
+                else:
+                    trend_progress = 1 - (1 - progress) ** 0.8  # 加速下跌
+                
+                daily_target = base_price * (1 + total_change_percent * trend_progress)
+                daily_noise = random.uniform(-volatility, volatility) * base_price
+                
+                next_price = daily_target + daily_noise
+                # 确保价格不会过度偏离趋势
+                if trend_direction == "上涨":
+                    next_price = max(prices[-1] * 0.98, next_price)
+                elif trend_direction == "下跌":
+                    next_price = min(prices[-1] * 1.02, next_price)
+                
+                prices.append(next_price)
+
+        # 确保所有价格都是正数且合理
+        prices = [max(1.0, price) for price in prices]
+        
+        df = pd.DataFrame({"日期": dates, "价格": [round(p, 2) for p in prices]})
+        
+        # 图表绘制
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # 根据趋势选择颜色
+        line_color = {
+            "上涨": "#2E8B57",  # 深绿色
+            "下跌": "#DC143C",  # 深红色
+            "震荡": "#4682B4"   # 钢蓝色
+        }.get(trend_direction, "#696969")
+        
+        # 绘制价格线
+        ax.plot(df["日期"], df["价格"], 
+                marker="o", linewidth=2.5, markersize=6, 
+                color=line_color, markerfacecolor="white", 
+                markeredgecolor=line_color, markeredgewidth=2)
+        
+        # 添加趋势区域填充
+        if trend_direction != "震荡":
+            ax.fill_between(df["日期"], df["价格"], 
+                          [prices[0]] * len(prices), 
+                          alpha=0.2, color=line_color)
+        
+        # 图表美化
+        ax.set_title(f"未来一周价格预测 - {trend_direction}趋势 (置信度: {confidence_level:.1%})", 
+                    fontsize=16, fontweight='bold', pad=20)
         ax.set_xlabel("日期", fontsize=12)
         ax.set_ylabel("价格 (元)", fontsize=12)
-        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.grid(True, linestyle="--", alpha=0.3)
+        
+        # 添加趋势标注
+        final_change = (prices[-1] / prices[0] - 1) * 100
+        trend_label = f"{trend_direction} {final_change:+.1f}%"
+        ax.text(0.02, 0.98, trend_label, transform=ax.transAxes, 
+                fontsize=12, fontweight='bold',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor=line_color, alpha=0.2),
+                verticalalignment='top')
+        
         plt.tight_layout()
         
         return {
-            "direction": "看涨 ▲" if prices[-1] > prices[0] else "看跌 ▼",
-            "change_rate": f"{(prices[-1]/prices[0]-1)*100:.2f}%",
+            "direction": f"{trend_direction} {'▲' if final_change > 0 else '▼' if final_change < 0 else '→'}",
+            "change_rate": f"{final_change:+.2f}%",
             "chart": fig
         }
+        
     except Exception as e:
         print(f"生成图表失败: {e}")
+        import traceback
+        traceback.print_exc()
+        
         # 创建错误图表
-        fig, ax = plt.subplots(figsize=(8,5))
-        ax.text(0.5, 0.5, "图表生成失败\n请检查数据", 
-                ha="center", va="center", fontsize=14)
-        ax.set_title("图表错误", color="red")
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.text(0.5, 0.5, f"图表生成失败\n错误: {str(e)[:50]}...", 
+                ha="center", va="center", fontsize=12, color="red")
+        ax.set_title("图表生成错误", color="red")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
         return {
             "direction": "错误",
             "change_rate": "N/A",
@@ -661,7 +811,6 @@ def analyze_stock(stock_code, use_mock_data):
 # 界面布局
 with gr.Blocks(
     title="智能股票分析系统",
-    theme=gr.themes.Soft(primary_hue="sky"),
     css="""
     #main-title { text-align: center; margin-bottom: 10px }
     .panel { border-radius: 12px !important; padding: 15px !important; }

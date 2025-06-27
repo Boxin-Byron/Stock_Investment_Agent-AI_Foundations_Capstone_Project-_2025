@@ -1,3 +1,4 @@
+
 import os
 import random
 import datetime
@@ -397,18 +398,57 @@ def generate_explanation(metrics: dict, news_result: dict) -> dict:
     return explanation
 
 def process_dify_flow_outputs(dify_flow_output):
+    """处理Dify流输出，增强容错性"""
     try:
+        # 检查输入是否为空或None
+        if not dify_flow_output or 'answer' not in dify_flow_output:
+            print("⚠️ Dify输出为空或缺少answer字段")
+            return [
+                {"error": "Dify输出为空"},
+                {"error": "新闻分析失败"},
+                {"error": "综合分析失败"}
+            ]
+        
         input_string = dify_flow_output['answer']
-        string = input_string.replace("\n", "")
+        if not input_string or input_string.strip() == "":
+            print("⚠️ Dify返回的answer字段为空")
+            return [
+                {"error": "Dify返回内容为空"},
+                {"error": "新闻分析失败"},
+                {"error": "综合分析失败"}
+            ]
+        
+        print(f"📝 Dify原始输出: {input_string[:200]}...")
+        
+        # 清理字符串
+        string = input_string.replace("\n", "").strip()
+        
+        # 如果不包含JSON分隔符，可能是纯文本回答
+        if "}{"  not in string:
+            print("⚠️ Dify输出不包含预期的JSON格式")
+            return [
+                {"raw_content": string},
+                {"error": "格式解析失败"},
+                {"error": "分析失败"}
+            ]
+        
         str_list = string.split("}{")
         
-        # 确保我们有三个独立字典
+        # 确保我们有足够的部分
+        if len(str_list) < 3:
+            print(f"⚠️ 分割后只有{len(str_list)}个部分，期望3个")
+            # 补齐缺失的部分
+            while len(str_list) < 3:
+                str_list.append('{"error": "数据缺失"}')
+        
+        # 重新构建完整的JSON字符串
         str_list[0] += "}"
-        str_list[1] = "{" + str_list[1] + "}"
-        str_list[2] = "{" + str_list[2]
+        for i in range(1, len(str_list) - 1):
+            str_list[i] = "{" + str_list[i] + "}"
+        str_list[-1] = "{" + str_list[-1]
         
         new_list = []
-        for item in str_list:
+        for i, item in enumerate(str_list[:3]):  # 只处理前3个
             try:
                 # 直接加载为JSON对象
                 parsed_item = json.loads(item)
@@ -419,32 +459,46 @@ def process_dify_flow_outputs(dify_flow_output):
                         # 尝试解析latest_metrics字符串
                         if isinstance(parsed_item['latest_metrics'], str):
                             parsed_item['latest_metrics'] = json.loads(parsed_item['latest_metrics'])
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as inner_e:
+                        print(f"⚠️ latest_metrics解析失败: {inner_e}")
                         # 如果无法解析，保持原始格式
                         pass
                     
                 new_list.append(parsed_item)
+                print(f"✅ 成功解析第{i+1}个JSON对象")
+                
             except json.JSONDecodeError as e:
-                print(f"JSON解析错误: {e} | 原始内容: {item}")
-                # 如果无法解析为JSON，作为纯文本存入
-                new_list.append({"raw_content": item})
+                print(f"❌ JSON解析错误 (第{i+1}个): {e} | 原始内容: {item[:100]}...")
+                # 如果无法解析为JSON，创建错误对象
+                new_list.append({
+                    "error": f"JSON解析失败: {str(e)}",
+                    "raw_content": item[:100] + "..." if len(item) > 100 else item
+                })
+        
         return new_list
-    except:
-        print(f"处理输出失败: {e}")
-        # 添加备用解析方案
+        
+    except Exception as main_e:
+        print(f"❌ 处理输出失败: {main_e}")
+        print(f"❌ 异常类型: {type(main_e).__name__}")
+        
+        # 备用解析方案
         try:
-            if "latest_metrics" in input_string:
-                start = input_string.find("{", input_string.find("latest_metrics"))
-                end = input_string.find("}", start) + 1
-                metrics = json.loads(input_string[start:end])
-                # ...类似处理其他部分
-            return [metrics, news, analysis] if all else []
-        except:
-            return [
-                {"raw_content": input_string[:100] + "..."},
-                {"error": "解析失败"},
-                {"error": "分析失败"}
-            ]
+            if dify_flow_output and 'answer' in dify_flow_output:
+                input_string = dify_flow_output['answer']
+                return [
+                    {"raw_content": input_string[:200] + "..." if len(input_string) > 200 else input_string},
+                    {"error": "主解析失败，使用备用方案"},
+                    {"error": f"分析失败: {type(main_e).__name__}"}
+                ]
+        except Exception as backup_e:
+            print(f"❌ 备用解析也失败: {backup_e}")
+        
+        # 最终兜底方案
+        return [
+            {"error": "完全解析失败"},
+            {"error": "新闻分析不可用"},
+            {"error": "综合分析不可用"}
+        ]
 
 
 @app.get("/health")
@@ -458,25 +512,31 @@ async def health_check():
 
 @app.get("/api/network_test")
 def network_test():
-    """测试网络连接状况"""
+    """测试网络连接状况（针对中国大陆优化）"""
     test_urls = [
-        "https://api.dify.ai", 
         "https://www.baidu.com",
-        "https://www.google.com"
+        "https://httpbin.org/status/200",  # 简单的HTTP测试
+        "https://api.dify.ai"  # Dify API服务
     ]
     
     results = {}
     for url in test_urls:
         try:
             start = time.time()
-            response = requests.head(url, timeout=5)
+            # 禁用代理以避免连接问题
+            response = requests.head(url, timeout=10, verify=False, 
+                                   proxies={'http': '', 'https': ''})
             latency = round((time.time() - start) * 1000, 2)
             results[url] = {
                 "status_code": response.status_code,
-                "latency_ms": latency
+                "latency_ms": latency,
+                "accessible": True
             }
         except Exception as e:
-            results[url] = {"error": str(e)}
+            results[url] = {
+                "error": str(e),
+                "accessible": False
+            }
     
     return results
 
@@ -486,15 +546,29 @@ async def stock_eval(request: Request):  # 添加 async 关键字
     try:
         # 使用 await 获取 JSON 数据
         print(f"📬 收到请求: {request.method} {request.url}")
-        body = await request.json()
+        
+        # 支持两种方式：JSON body 和 查询参数
+        try:
+            body = await request.json()
+            stock_code = body.get("stock_code")
+            user_id = body.get("user_id", "default_user")
+        except:
+            # 如果 JSON 解析失败，尝试从查询参数获取
+            stock_code = request.query_params.get("stock_code")
+            user_id = request.query_params.get("user_id", "default_user")
+            body = {"stock_code": stock_code, "user_id": user_id}
+            
         print(f"📥 收到请求体: {body}")
-        stock_code = body.get("stock_code")
-        user_id = body.get("user_id", "default_user")
         print(f"📊 分析股票: {stock_code}, 用户ID: {user_id}")
-        print(f"📊 分析股票: {stock_code}")
-
+        
+        # 确保stock_code是字符串类型且不为None
+        if not stock_code:
+            raise HTTPException(status_code=400, detail="缺少股票代码参数")
+        stock_code = str(stock_code).strip()
+        
         if contains_chinese(stock_code):
-            stock_code = get_stock_code_with_deepseek(stock_code)
+            temp_code = get_stock_code_with_deepseek(stock_code)
+            stock_code = str(temp_code) if temp_code else stock_code
 
         dify_flow_output = call_dify_flow(stock_code, user_id)  # 正确：传递当前用户的user_id
 
@@ -502,13 +576,40 @@ async def stock_eval(request: Request):  # 添加 async 关键字
         processed_data = process_dify_flow_outputs(dify_flow_output)
         print(f"🔍 处理后的数据: {processed_data}")
 
-        kline_result = processed_data[0]
-        news_result = processed_data[1]
-        text = news_result['data']['outputs']['text'].replace('```json', '').replace('```', '').strip()
-        text = re.sub(r'\n\s*', '', text)  # 去除换行和多余空格
-        news_result = json.loads(text) # 输出 key_events 列表
-
-        assistant_result = processed_data[2]
+        # 安全地提取各部分数据
+        kline_result = processed_data[0] if len(processed_data) > 0 else {}
+        news_result_raw = processed_data[1] if len(processed_data) > 1 else {}
+        assistant_result = processed_data[2] if len(processed_data) > 2 else {}
+        
+        # 处理新闻结果
+        news_result = {}
+        try:
+            if (news_result_raw and 
+                isinstance(news_result_raw, dict) and 
+                'data' in news_result_raw and 
+                isinstance(news_result_raw['data'], dict)):
+                
+                data_obj = news_result_raw['data']
+                if ('outputs' in data_obj and 
+                    isinstance(data_obj['outputs'], dict)):
+                    
+                    outputs_obj = data_obj['outputs']
+                    if 'text' in outputs_obj:
+                        text = str(outputs_obj['text']).replace('```json', '').replace('```', '').strip()
+                        text = re.sub(r'\n\s*', '', text)  # 去除换行和多余空格
+                        news_result = json.loads(text) # 输出 key_events 列表
+                    else:
+                        print("⚠️ 新闻结果缺少text字段")
+                        news_result = {"error": "新闻数据格式错误"}
+                else:
+                    print("⚠️ 新闻结果缺少outputs字段")
+                    news_result = {"error": "新闻数据格式错误"}
+            else:
+                print("⚠️ 新闻结果缺少data字段或格式错误")
+                news_result = {"error": "新闻数据不可用"}
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            print(f"❌ 新闻结果解析失败: {e}")
+            news_result = {"error": f"新闻解析失败: {str(e)}"}
         print(f"📈 K线分析结果: {kline_result}")
         print(f"📰 新闻分析结果: {news_result}")
         print(f"🤖 助手分析结果: {assistant_result}")
@@ -548,20 +649,32 @@ async def stock_eval(request: Request):  # 添加 async 关键字
         assistant_analysis = ""
         if assistant_result:
             try:
-                if '分析过程' in assistant_result and '最终投资建议' in assistant_result:
-                    # 结构化返回助手分析的详细信息
-                    assistant_analysis = {
-                        "analysis_process": assistant_result.get('分析过程', ''),
-                        "tech_summary": assistant_result.get('最终投资建议', {}).get('技术面总结', ''),
-                        "news_summary": assistant_result.get('最终投资建议', {}).get('新闻情绪总结', ''),
-                        "recommendation_details": assistant_result.get('最终投资建议', {}).get('综合判断与投资建议', {})
-                    }
-                elif 'raw_content' in assistant_result:
+                if isinstance(assistant_result, dict) and '分析过程' in assistant_result and '最终投资建议' in assistant_result:
+                    # 确保最终投资建议是字典类型
+                    final_recommendation = assistant_result.get('最终投资建议', {})
+                    if isinstance(final_recommendation, dict):
+                        assistant_analysis = {
+                            "analysis_process": assistant_result.get('分析过程', ''),
+                            "tech_summary": final_recommendation.get('技术面总结', ''),
+                            "news_summary": final_recommendation.get('新闻情绪总结', ''),
+                            "recommendation_details": final_recommendation.get('综合判断与投资建议', {})
+                        }
+                    else:
+                        # 如果最终投资建议不是字典，使用字符串格式
+                        assistant_analysis = {
+                            "analysis_process": assistant_result.get('分析过程', ''),
+                            "tech_summary": str(final_recommendation),
+                            "news_summary": "",
+                            "recommendation_details": str(final_recommendation)
+                        }
+                elif isinstance(assistant_result, dict) and 'raw_content' in assistant_result:
                     # 对于无法解析的内容，返回原始文本
                     assistant_analysis = {"raw_analysis": assistant_result['raw_content']}
                 else:
                     assistant_analysis = {"error": "未获取到有效分析"}
-            except:
+            except Exception as parse_error:
+                print(f"❌ 助手分析解析失败: {parse_error}")
+                assistant_analysis = {"error": f"解析失败: {str(parse_error)}"}
                 final_recommendation = assistant_result.get('最终投资建议', '')
                 # 使用正则表达式提取分析内容   
                 tech_summary = re.search(r'### 技术面总结(.*?)### 新闻情绪总结', text, re.DOTALL)
@@ -584,9 +697,21 @@ async def stock_eval(request: Request):  # 添加 async 关键字
                 }
 
         print(f"🤖 助手分析: {assistant_analysis}")
+        
+        # 确保metrics是字典类型
+        if not isinstance(metrics, dict):
+            print(f"⚠️ metrics不是字典类型: {type(metrics)}, 使用默认值")
+            metrics = {}
+        
+        # 确保news_result是字典类型
+        if not isinstance(news_result, dict):
+            print(f"⚠️ news_result不是字典类型: {type(news_result)}, 使用默认值")
+            news_result = {}
+        
         # 计算综合评分
         score = calculate_comprehensive_score(metrics, news_result) if news_result else 0.0
         print(f"🔢 综合评分: {score}")
+        
         # 生成解释文本
         explanation = generate_explanation(metrics, news_result) if news_result else {
             "kline_analysis": ["未获取到技术分析数据"],
