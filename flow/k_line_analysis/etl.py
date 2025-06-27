@@ -5,8 +5,7 @@ import os
 from typing import Optional
 
 # 从环境变量获取 Tushare Token
-TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN', "8017322f593efd7df8c9f04fde624cc94c9c60f256c5e0f6ffca6831")  # 默认值用于本地开发
-ts.set_token(TUSHARE_TOKEN)
+TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN')
 pro = ts.pro_api()
 
 def format_ts_code(code: str):
