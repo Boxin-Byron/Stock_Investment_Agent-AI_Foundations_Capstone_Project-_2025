@@ -78,8 +78,8 @@ init_db()
 
 
 # 从环境变量获取配置
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-653829eacd30417996f70834039c0414")
-DIFY_FLOW_API_KEY = os.getenv("DIFY_FLOW_API_KEY", "app-Pmqm52DKmWlzsTi07I3uQbSn")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DIFY_FLOW_API_KEY = os.getenv("DIFY_FLOW_API_KEY")
 
 app = FastAPI()
 # 允许跨域
